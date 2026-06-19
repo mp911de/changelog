@@ -1,0 +1,382 @@
+= Changelog Reference Documentation
+:toc: left
+:toclevels: 2
+
+You do not need to read this document to use the tool.
+It is intended for maintainers who want to understand why a particular change appears (or does not appear) in the generated notes and how to influence that through commit messages and configuration.
+
+== Writing Good Commit Messages
+
+A changelog is only as good as the commit history it is generated from.
+Two short articles cover the conventions assumed throughout this document:
+https://cbea.ms/git-commit/[How to Write a Git Commit Message] and
+https://tbaggery.com/2008/04/19/a-note-about-git-commit-messages.html[A Note About Git Commit Messages].
+
+In summary:
+
+* Separate the subject from the body with a blank line.
+* Keep the subject short and write it in the imperative mood, for example `Skip type inspection for transient properties`.
+* Do not end the subject with a period.
+* Use the body to explain what changed and why, not how.
+* Wrap the body at a readable width.
+
+=== Ticket References are Breadcrumbs
+
+A ticket reference connects a commit to the issue or pull request that motivated it.
+The reference is a breadcrumb.
+Years after a change is merged, that link is often the only path back to the discussion, the reproduction, and the decision behind the code ("Code archaeology").
+Recording it costs one line and pays off whenever someone has to understand why the code looks the way it does.
+
+`changelog` reads these references to build release notes.
+A repository that references tickets consistently produces accurate notes with no extra effort, so the same discipline that helps future maintainers also produces a better changelog.
+
+== Referencing Tickets
+
+Associate a commit with one or more https://docs.github.com/en/issues/tracking-your-work-with-issues/using-issues/linking-a-pull-request-to-an-issue[GitHub issues or pull requests]. `changelog` does the rest to discover references and pick the contextually best match for changelog inclusion and contributor crediting.
+A reference may be written in any of the following forms:
+
+[cols="1,2",options="header"]
+|===
+| Form | Example
+
+| Plain reference
+| `#1234` or `gh-1234`
+
+| Cross-repository reference
+| `spring-projects/spring-data-commons#1234`
+
+| Issue or pull request URL
+| `https://github.com/spring-projects/spring-data-commons/issues/1234`
+|===
+
+A `gh-1234` reference is normalized to `#1234`.
+A cross-repository reference is resolved against the repository it names rather than the repository being released (see <<cross-repository-references>>).
+
+The sections that follow start from the simplest reference and add qualifiers that enrich the context.
+Every example is a real commit message.
+
+=== A Plain Reference
+
+The simplest reference is the ticket number on its own line.
+
+[source]
+----
+Use `ConcurrentLruCache` in `PersistentPropertyPathFactory`.
+
+#3493
+----
+
+The referenced ticket becomes a changelog entry.
+A plain reference is the baseline, not an error or a fallback; it is the easiest way to include a change in the notes.
+
+=== Closing a Ticket
+
+A closing keyword states that the commit resolves the ticket.
+The recognized keywords are `close`, `closes`, `closed`, `fix`, `fixes`, `fixed`, `resolve`, `resolves`, and `resolved`.
+
+[source]
+----
+Consider only instance `with` methods for property access.
+
+Closes #3472
+----
+
+A closed ticket becomes a changelog entry, the same as a plain reference.
+The difference matters when a commit message contains more than one reference: a closing reference takes precedence over a plain reference when the entry is selected (see <<combining-references>>).
+
+=== Crediting a Pull Request
+
+When a change is contributed through a pull request and then polished, forward-ported, or back-ported by a maintainer, record the originating pull request with an `Original pull request:` trailer.
+
+[source]
+----
+Skip type inspection for transient properties.
+
+Closes #3485
+Original pull request: #3486
+----
+
+The `Closes #3485` reference supplies the changelog entry.
+The `Original pull request: #3486` reference credits the pull request author in the Contributors section (see <<crediting-contributors>>).
+The credit is granted independently of the entry, so the maintainer who applied the commit does not displace the original contributor.
+
+=== Pointing to Related Context
+
+A `See` reference points to a related issue or pull request, frequently in another repository, that provides context for the change.
+
+[source]
+----
+Remove deprecated methods.
+
+See #2996
+Closes #2995
+----
+
+Here `Closes #2995` supplies the entry and `See #2996` records the related ticket.
+A `See` reference is most useful alongside a closing reference, and it accepts the cross-repository and URL forms:
+
+[source]
+----
+Make reference to XML namespace optional.
+
+Closes #2662
+See https://github.com/spring-projects/spring-data-relational/issues/1290
+Original pull request #2664
+----
+
+=== Recording Related Tickets
+
+A `Related ticket:` (or `Related tickets:`) trailer records supporting tickets that the change touches without resolving.
+
+[source]
+----
+Stop supporting params not annotated with `@ProjectedPayload`.
+
+Closes #3301
+Original pull request: #3453
+Related ticket: #3298
+----
+
+Related tickets are context only.
+They do not become changelog entries and do not credit contributors.
+In this example `#3301` supplies the entry, `#3453` credits the contributor, and `#3298` is recorded for the reader without affecting the notes.
+
+[[combining-references]]
+=== Combining References
+
+A commit message may carry references of several kinds.
+The kind decides what each reference contributes to the notes.
+When more than one reference could supply the changelog entry, the strongest kind present wins, in this order:
+
+. A closing reference (`Closes #1234`).
+. An original pull request reference (`Original pull request: #1234`).
+. A `See` reference (`See #1234`).
+. A plain reference (`#1234`).
+
+All references of the winning kind become entries; references of weaker kinds in the same message do not.
+Related references are never entries.
+
+This precedence applies only to the changelog entry.
+Contributor credit is independent: an `Original pull request:` reference always credits its author, even when a closing reference supplies the entry.
+
+NOTE: An `Original pull request:` reference also supplies the changelog entry when the message contains no closing reference, so a pull request that closes nothing explicitly still appears in the notes.
+
+== How Changes become changelog entries
+
+Each selected reference is resolved against GitHub to obtain the issue or pull request title, labels, and URL.
+The resolved change is then placed into a section.
+
+=== Sections and Labels
+
+Sections are matched by label, in configuration order:
+
+. *Exclusion.* If any label matches a configured excluded label, the change is omitted from the notes entirely.
+. *First matching section.* The change is placed in the first configured section whose labels match one of the change's labels.
+. *Unclassified.* If no section matches, the change is omitted by default, or collected under an `Other Changes` section when `--all` is given.
+
+Because the first matching section wins, the order of sections in the configuration is significant.
+Entries appear in the order their commits occur in the range.
+
+Label matching is case-insensitive and anchored on word boundaries.
+A configured token therefore matches a whole-word label, including the common `Category: Value` convention, but not a label that merely contains it as a substring.
+
+[cols="1,1,2",options="header"]
+|===
+| Configured token | Matches | Does not match
+
+| `bug`
+| `bug`, `Bug`, `Type: Bug`
+| `debugging`, `non-bug`
+|===
+
+A reference whose issue or pull request cannot be found, because it was deleted, is private, or the number is wrong, produces no entry.
+
+[[crediting-contributors]]
+== Crediting Contributors
+
+Changelog Tool appends a Contributors section that thanks the authors of contributed pull requests.
+An author is credited through either of these paths:
+
+* A changelog entry that GitHub reports as a pull request credits its author.
+* An `Original pull request:` reference credits its author, even if GitHub reports the ticket as an issue.
+The commit message is the source of truth.
+
+An author listed in the `team` configuration is never credited.
+By default the team contains the authenticated user, so maintainers are excluded automatically.
+
+Each contributor is listed once and contributors are sorted alphabetically, ignoring case.
+The login is displayed with the spelling GitHub returns.
+
+== Selecting the Commit Range
+
+Changelog Tool scans the non-merge commits in a range.
+The range can be resolved from a single version or given explicitly.
+In both forms the lower bound is excluded and the upper bound is included.
+
+=== Releasing a Version
+
+Given a single version, `changelog` resolves the commit range from the repository's tags and branches:
+
+[source,shell]
+----
+changelog 4.0.4
+----
+
+Supported forms: SemVer (`4.0.0`), shortened forms (`4`, `4.0`), a `v` prefix (`v4.0.0`), Spring-style qualifiers (`4.0.0.RELEASE`, `4.0.0.Final`), and pre-releases (`4.0.0-M1`, `4.0.0-RC1`, `4.0.0.SNAPSHOT`).
+
+* *Lower bound* (`from`): the previous release.
+A patch uses the previous patch (`4.0.4` against `4.0.3`).
+A line opener (`X.Y.0`) uses the opener of the preceding line: a minor against the previous minor (`4.1.0` against `4.0.0`), a major against the opener of the previous major's most recent line (`4.0.0` against `3.5.0`).
+* *Upper bound* (`to`): an existing tag for the version (which regenerates released notes), otherwise the maintenance-branch tip (`4.0.x`, preferring a local branch, then `origin`, then any other remote) for a patch, otherwise `HEAD` for a line opener.
+
+In each diagram `<--` marks the resolved bounds and `Range` is the result.
+
+==== Patch
+
+Before `4.0.4` is tagged, the upper bound is the tip of the `4.0.x` branch:
+
+[source]
+----
+Generation: 4.0
+
+ Branch:   4.0.x    <--  HEAD should be shipped 🚤 as 4.0.4
+  Tags:    4.0.0
+           4.0.1
+           4.0.2
+           4.0.3    <-- Previous version 🔀
+
+ Range:    4.0.3..4.0.x
+----
+
+After `4.0.4` is tagged, the tag is the upper bound and the same notes are reproduced:
+
+[source]
+----
+Generation: 4.0
+
+ Branch:   4.0.x    <-- HEAD points to 4.0.5  💫
+  Tags:    4.0.0
+           4.0.1
+           4.0.2
+           4.0.3    <-- Previous version      🔀
+           4.0.4    <-- Changelog upper bound 📦
+
+ Range:    4.0.3..4.0.4
+----
+
+==== Minor
+
+`4.1.0` opens the 4.1 line.
+The lower bound is the previous minor's opener and the upper bound is `HEAD`:
+
+[source]
+----
+Generation: 4.1
+
+ Branch:   main     <-- HEAD opens 4.1   📦
+           4.0.x
+  Tags:    4.0.0    <-- Previous version 🔀
+           4.0.1
+
+ Range:    4.0.0..HEAD
+----
+
+==== Major
+
+`4.0.0` opens the 4.0 line, before any `4.0.x` branch exists.
+The lower bound is the opener of the previous major's most recent line (`3.5.0`, not its latest patch `3.5.1`):
+
+[source]
+----
+Generation: 4.0
+
+ Branch:   main     <-- HEAD opens 4.0   📦
+           3.5.x
+  Tags:    3.5.0    <-- Previous version 🔀
+           3.5.1
+
+ Range:    3.5.0..HEAD
+----
+
+`changelog` stops rather than guessing when the history is incomplete: a missing predecessor between existing releases is reported as a gap, and a target with no earlier release as a first release.
+In both cases, pass an explicit range (see <<explicit-ranges>>).
+
+Use `--resolve-previous` to print the resolved previous version and exit.
+
+[[explicit-ranges]]
+=== Explicit Ranges
+
+An explicit range supplies both bounds, as two arguments or in Git's two-dot notation:
+
+[source,shell]
+----
+changelog 4.0.0 4.0.4
+changelog 4.0.0..4.0.4
+----
+
+The two forms are equivalent.
+Each bound may be a tag, a branch, or a commit SHA.
+An empty upper bound (`4.0.0..`) means up to `HEAD`.
+Three-dot notation is not supported.
+
+== Configuration
+
+=== File Location and Precedence
+
+On its first run in a repository, Changelog Tool writes a configuration file with sensible defaults.
+If the repository contains a `.github` directory, the file is created at `.github/changelog.json`; otherwise it is created at `.changelog/changelog.json`.
+
+When both files exist, `.github/changelog.json` takes precedence.
+An existing file is never moved or duplicated, and an invalid file is reported as an error rather than silently replaced, so that a typo cannot quietly change which entries appear in your notes.
+
+=== Keys
+
+[cols="1,3",options="header"]
+|===
+| Key | Description
+
+| `sections`
+| An ordered list of sections. Each section has a `title` (the Markdown heading), a list of `labels` to match, and an optional `summary` (a short word shown in the run summary, such as `features`). Order is significant: a change is placed in the first matching section.
+
+| `excludeLabels`
+| Labels that cause a matching change to be omitted from the notes entirely.
+
+| `team`
+| GitHub logins that are never credited in the Contributors section, matched ignoring case. By default this contains the authenticated user.
+
+| `followReferences`
+| An optional allow-list of `owner/repo` patterns for cross-repository references, where `*` matches one or more characters. A new configuration is seeded with `<owner>/*`. An absent or empty list follows every reference.
+|===
+
+[[cross-repository-references]]
+A cross-repository reference is looked up only when its `owner/repo` matches `followReferences`.
+A reference held back this way produces no changelog entry and no contributor credit.
+References to the repository being released are always followed.
+
+=== Default Configuration
+
+[source,json]
+----
+{
+  "sections": [
+    { "title": ":star: New Features", "labels": ["enhancement"], "summary": "features" },
+    { "title": ":lady_beetle: Bug Fixes", "labels": ["bug", "regression"], "summary": "bugs" },
+    { "title": ":notebook_with_decorative_cover: Documentation", "labels": ["documentation"] },
+    { "title": ":hammer: Dependency Upgrades", "labels": ["dependency-upgrade"] }
+  ],
+  "excludeLabels": ["type: task"],
+  "team": ["<your login>"],
+  "followReferences": ["<owner>/*"]
+}
+----
+
+TIP: To re-categorize changes, adjust the `labels` of a section or reorder the sections.
+To hide a class of changes, add their label to `excludeLabels`.
+To include changes that match no section, run with `--all`.
+
+=== Caching
+
+Resolved issues and pull requests are stored in a cache under the working directory at `.changelog/<repo>.cache.json`, keyed by repository and number.
+Later runs reuse cached entries to avoid repeating network requests.
+Pass `--refresh` to bypass the cache and re-fetch.
+The cache is a regenerable artifact; a corrupt file is rebuilt automatically rather than failing the run.

@@ -1,0 +1,75 @@
+= Contributing
+
+`changelog` is released under the Apache 2.0 license.
+If you would like to contribute something, this document should help you get started. Contributions of all kinds are welcome: bug reports, enhancement suggestions, documentation fixes, and pull requests.
+
+== Code of Conduct
+
+This project adheres to the Contributor Covenant https://www.contributor-covenant.org/version/2/1/code_of_conduct/[code of conduct].
+By participating, you are expected to uphold it.
+Please be respectful and considerate in your interactions with others.
+
+== Using GitHub issues
+
+We use GitHub issues to track bugs and enhancements.
+The issue tracker is not a general-purpose Q&A forum: if you have a usage question ("how do I ...?"), please do not open an issue.
+Ask in GitHub Discussions instead.
+Questions raised as issues will usually be closed.
+
+Before opening an issue, search the existing ones. Your bug or idea may already be tracked,
+and adding to an existing thread is more useful than starting a new one.
+
+=== Reporting a bug
+
+Security vulnerabilities must not be reported through a public issue.
+Follow the private reporting process in link:SECURITY.md[SECURITY.md] instead.
+
+If you are reporting a bug, please help to speed up diagnosis by providing as much information as possible:
+
+* the version of the tool (`changelog --version`) and of Node.js (`node --version`);
+* the exact command you ran, including the commit range and any options such as `--repo`, `--all`, `--refresh`, or `--show-commits`;
+* what you expected to happen and what actually happened, including any error output and,  where relevant, the generated `release-notes.md`;
+* ideally, a public repository and commit range that reproduces the problem.
+
+=== Suggesting an enhancement
+
+For enhancements, describe the problem you are trying to solve and the use case behind it, not only the change you have in mind.
+That context helps us arrive at the solution that fits the tool best.
+
+== Pull requests
+
+Contributions are submitted as pull requests.
+
+* For anything beyond a trivial fix, please open an issue first so the change can be discussed before you invest time in it.
+* Keep each pull request focused on a single concern; send unrelated changes separately.
+* Add tests for new behavior and bug fixes, and make sure the existing test suite and type checks pass.
+* Follow the style and conventions of the surrounding code.
+* Use clear commit messages and rebase your branch on the latest `main` before opening the request.
+
+== Local development
+
+Changelog Tool is a TypeScript project built with `tsdown` and tested with `vitest`:
+
+[source,shell]
+----
+npm install
+npm run build        # bundle to dist/
+npm test             # run the test suite
+npm run typecheck    # tsc --noEmit
+npm run run -- <version>        # resolve a release range and run from source
+npm run run -- <from>..<to>     # run an explicit range from source
+----
+
+[NOTE]
+====
+Running from source via `npm run run` (vite-node) prints a Node deprecation warning:
+
+----
+(node:NNNN) [DEP0205] DeprecationWarning: `module.register()` is deprecated.
+----
+
+This comes from Vite's module runner upstream, only affects local development, and is harmless.
+The shipped `dist/cli.js` does not emit it.
+It will disappear once Vite migrates to
+`module.registerHooks()`.
+====

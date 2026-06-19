@@ -1,0 +1,67 @@
+{
+	"name": "@mp911de/changelog",
+	"version": "0.1.0",
+	"description": "Standalone TypeScript CLI that generates GitHub release notes for a commit range.",
+	"keywords": [
+		"github",
+		"changelog"
+	],
+	"homepage": "https://github.com/mp911de/changelog#readme",
+	"bugs": {
+		"url": "https://github.com/mp911de/changelog/issues"
+	},
+	"repository": {
+		"type": "git",
+		"url": "git+https://github.com/mp911de/changelog.git"
+	},
+	"license": "Apache-2.0",
+	"author": "Mark Paluch",
+	"type": "module",
+	"bin": {
+		"changelog": "dist/cli.js"
+	},
+	"files": [
+		"dist",
+		"REFERENCE.adoc",
+		"CONTRIBUTING.adoc",
+		"SECURITY.md"
+	],
+	"scripts": {
+		"build": "tsdown",
+		"prepare": "tsdown",
+		"test": "vitest run",
+		"test:watch": "vitest",
+		"typecheck": "tsc --noEmit",
+		"run": "npx --no-install vite-node --script src/cli.ts",
+		"prettier": "prettier --write .",
+		"prettier:check": "prettier --check ."
+	},
+	"dependencies": {
+		"@octokit/plugin-throttling": "11.0.3",
+		"chalk": "5.6.2",
+		"commander": "15.0.0",
+		"js-yaml": "4.2.0",
+		"octokit": "5.0.5",
+		"p-limit": "7.3.0",
+		"string-width": "8.2.1"
+	},
+	"devDependencies": {
+		"@types/js-yaml": "4.0.9",
+		"@types/node": "24.13.2",
+		"prettier": "3.8.4",
+		"tsdown": "0.22.3",
+		"typescript": "5.6.3",
+		"vite-node": "3.2.0",
+		"vitest": "4.1.9"
+	},
+	"engines": {
+		"node": ">=24"
+	},
+	"overrides": {
+		"esbuild": "^0.28.1"
+	},
+	"allowScripts": {
+		"esbuild@0.28.1": true,
+		"fsevents@2.3.3": true
+	}
+}
