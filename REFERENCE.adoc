@@ -349,6 +349,8 @@ An existing file is never moved or duplicated, and an invalid file is reported a
 |===
 
 [[cross-repository-references]]
+=== Cross-repository references
+
 A cross-repository reference is looked up only when its `owner/repo` matches `followReferences`.
 A reference held back this way produces no changelog entry and no contributor credit.
 References to the repository being released are always followed.

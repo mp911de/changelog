@@ -22,8 +22,7 @@
 	},
 	"files": [
 		"dist",
-		"REFERENCE.adoc",
-		"CONTRIBUTING.adoc",
+		"REFERENCE.md",
 		"SECURITY.md"
 	],
 	"scripts": {
