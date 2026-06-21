@@ -84,10 +84,15 @@ jobs:
                   registry-url: https://registry.npmjs.org
                   package-manager-cache: false
 
+            - name: Install npm with install-script policy support
+              run: npm install --global "npm@$NPM_VERSION"
+
             - uses: actions/download-artifact@v4
               with:
                   name: npm-package
                   path: package
+            - name: Show package artifact
+              run: ls -la package
 
             - name: Publish the verified package with trusted publishing
               run: npm publish package/*.tgz --ignore-scripts --access public --tag latest
