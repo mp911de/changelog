@@ -91,8 +91,9 @@ jobs:
               with:
                   name: npm-package
                   path: package
+
             - name: Show package artifact
               run: ls -la package
 
             - name: Publish the verified package with trusted publishing
-              run: npm publish package/*.tgz --ignore-scripts --access public --tag latest
+              run: npm publish ./package/*.tgz --ignore-scripts --access public --tag latest
