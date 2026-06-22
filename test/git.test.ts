@@ -43,15 +43,15 @@ describe("scanCommits", () => {
 		expect(commits.map((commit) => commit.shortMessage)).toEqual(["first", "second"]);
 	});
 
-	it("traces the rev-parse checks and the git log issued while scanning", async () => {
+	it("traces the git log issued while scanning", async () => {
 		const base = repo.commit("base");
 		repo.commit("next");
 		const traced: string[] = [];
 
 		await scanCommits(base, "HEAD", repo.dir, (command) => traced.push(command));
 
-		expect(traced.some((line) => line.startsWith("git rev-parse "))).toBe(true);
-		expect(traced.some((line) => line.startsWith("git log "))).toBe(true);
+		expect(traced).toHaveLength(1);
+		expect(traced[0]).toMatch(/^git log /);
 	});
 
 	it("excludes merge commits", async () => {
@@ -100,12 +100,11 @@ describe("scanCommits", () => {
 		expect(commits[1]?.shortMessage).toBe("second");
 	});
 
-	it("reports revisions that are not available in the repository", async () => {
+	it("reports unavailable scan revisions from git log", async () => {
 		repo.commit("base");
 
 		await expect(scanCommits("missing-from", "missing-to", repo.dir)).rejects.toThrow(
-			`Git revisions "missing-from" and "missing-to" were not found in "${repo.dir}". ` +
-				"Run git fetch --tags in that repository or use available revisions.",
+			/git log failed: fatal: ambiguous argument 'missing-from\.\.missing-to'/,
 		);
 	});
 

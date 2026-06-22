@@ -96,7 +96,7 @@ export async function loadOrCreateConfig(
 	}
 
 	const created = defaultConfig(options.login, options.owner);
-	await writeJsonFile(candidates[0]!, created, { compact: true });
+	await writeJsonFile(candidates[0]!, created);
 	return created;
 }
 

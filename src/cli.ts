@@ -411,10 +411,14 @@ async function execute(
 								gitRepoRefs(cwd, trace),
 							)
 						: { from: invocation.range.from, to: invocation.range.to };
-				// Resolve the range head for the header; `from` only needs resolving when it is HEAD.
-				const resolvedFrom = await resolveCommit(from, cwd, trace);
-				const resolvedTo =
-					from === to ? resolvedFrom : await resolveCommit(to, cwd, trace);
+				// Resolve only the header values that will be rendered; scanning validates the range later.
+				const resolvedTo = renderer ? await resolveCommit(to, cwd, trace) : "";
+				const resolvedFrom =
+					renderer && from === "HEAD"
+						? from === to
+							? resolvedTo
+							: await resolveCommit(from, cwd, trace)
+						: "";
 				const adapterResult = await runtime.githubAdapter({
 					cwd,
 					repoOverride: invocation.repo,
@@ -422,8 +426,6 @@ async function execute(
 				});
 				const { repo, login } = adapterResult;
 
-				const toSha = renderer ? resolvedTo : "";
-				const fromSha = renderer && from === "HEAD" ? resolvedFrom : "";
 				// Classify the bounds for their header links only when a renderer will show them.
 				const fromKind = renderer
 					? await classifyRef(from, cwd, trace)
@@ -449,8 +451,8 @@ async function execute(
 					to,
 					fromKind,
 					toKind,
-					fromSha,
-					toSha,
+					fromSha: resolvedFrom,
+					toSha: resolvedTo,
 					config,
 					lookup,
 				};

@@ -90,27 +90,6 @@ describe("loadOrCreateConfig", () => {
 		expect(written.endsWith("\n")).toBe(true);
 	});
 
-	it("writes the created file in the documented compact layout", async () => {
-		await loadOrCreateConfig({ baseDir, login: "octocat", owner: "octo-org" });
-
-		const written = readFileSync(
-			join(baseDir, ".changelog", "changelog.json"),
-			"utf8",
-		);
-		// Each section is one line with an inline labels array, and the top-level string arrays are
-		// inline too -- not expanded one element per line.
-		expect(written).toContain(
-			'{ "title": ":star: New Features", "labels": ["enhancement"], "summary": "features" }',
-		);
-		expect(written).toContain(
-			'{ "title": ":hammer: Dependency Upgrades", "labels": ["dependency-upgrade", "dependencies"] }',
-		);
-		expect(written).toContain('\n  "excludeLabels": ["type: task"],');
-		expect(written).toContain('\n  "team": ["octocat"],');
-		expect(written).toContain('\n  "followReferences": ["octo-org/*"]');
-		expect(written).not.toContain('"labels": [\n');
-	});
-
 	it("loads an existing config without overwriting it", async () => {
 		const existing = {
 			sections: [

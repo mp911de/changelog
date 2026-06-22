@@ -409,7 +409,7 @@ describe("main run-level", () => {
 		expect(err.join("")).not.toMatch(/^\s+at .+:\d+:\d+/m);
 	});
 
-	it("validates an explicit Git range before creating the GitHub adapter", async () => {
+	it("lets git log validate an explicit Git range during scanning", async () => {
 		let adapterCalls = 0;
 		const adapter: GitHubAdapterFactory = async () => {
 			adapterCalls += 1;
@@ -423,8 +423,8 @@ describe("main run-level", () => {
 		);
 
 		expect(code).toBe(1);
-		expect(adapterCalls).toBe(0);
-		expect(err.join("")).toContain("not found");
+		expect(adapterCalls).toBe(1);
+		expect(err.join("")).toContain("git log failed");
 	});
 
 	it("includes a stack trace on runtime failure when --debug is active", async () => {

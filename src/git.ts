@@ -58,8 +58,6 @@ export async function scanCommits(
 	cwd: string,
 	trace?: Trace,
 ): Promise<CommitRecord[]> {
-	await assertRevisionsExist([from, to], cwd, trace);
-
 	const format = ["%H", "%an", "%B", "%s"].join(NUL_FORMAT) + NUL_FORMAT;
 	const stdout = await runGit(
 		[
@@ -99,13 +97,19 @@ export async function resolveCommit(
 	cwd: string,
 	trace?: Trace,
 ): Promise<string> {
-	await assertRevisionsExist([ref], cwd, trace);
-	const stdout = await runGit(
-		["rev-parse", "--verify", "--end-of-options", `${ref}^{commit}`],
-		cwd,
-		{ trace },
-	);
-	return stdout.trim();
+	try {
+		const stdout = await runGit(
+			["rev-parse", "--verify", "--quiet", "--end-of-options", `${ref}^{commit}`],
+			cwd,
+			{ trace },
+		);
+		return stdout.trim();
+	} catch (error) {
+		if (hasCode(error, 1)) {
+			throw new Error(`Git revision "${ref}" was not found in "${cwd}".`);
+		}
+		throw error;
+	}
 }
 
 /**
@@ -209,54 +213,6 @@ function nonEmptyLines(stdout: string): string[] {
 		.filter((line) => line.length > 0);
 }
 
-async function assertRevisionsExist(
-	revisions: readonly string[],
-	cwd: string,
-	trace?: Trace,
-): Promise<void> {
-	const unique = [...new Set(revisions)];
-	const checks = await Promise.all(
-		unique.map(async (revision) => {
-			try {
-				await runGit(
-					[
-						"rev-parse",
-						"--verify",
-						"--quiet",
-						"--end-of-options",
-						`${revision}^{commit}`,
-					],
-					cwd,
-					{ trace },
-				);
-				return undefined;
-			} catch (error) {
-				// Exit code 1 from rev-parse --verify --quiet means the revision is absent; any other
-				// failure (missing git, not a repository) is already a clear error.
-				if (hasCode(error, 1)) {
-					return revision;
-				}
-				throw error;
-			}
-		}),
-	);
-	const missing = checks.filter(
-		(revision): revision is string => revision !== undefined,
-	);
-	if (missing.length === 0) {
-		return;
-	}
-
-	const subject =
-		missing.length === 1
-			? `revision "${missing[0]}" was`
-			: `revisions ${missing.map((revision) => `"${revision}"`).join(" and ")} were`;
-	throw new Error(
-		`Git ${subject} not found in "${cwd}". ` +
-			"Run git fetch --tags in that repository or use available revisions.",
-	);
-}
-
 /**
  * Run git, translating the cryptic failure modes (git not installed, directory is not a
  * repository, output too large to buffer) into actionable errors. Other failures, including
@@ -296,7 +252,7 @@ function translateGitError(error: unknown, args: string[], cwd: string): unknown
 			{ cause: error },
 		);
 	}
-	// refExists and assertRevisionsExist rely on catching rev-parse --verify --quiet exit 1 to detect
+	// refExists and resolveCommit rely on catching rev-parse --verify --quiet exit 1 to detect
 	// an absent ref, so leave that benign case as the raw error for hasCode(error, 1) to match. Any other
 	// non-zero exit carrying stderr is a real failure worth surfacing instead of an opaque "Command failed".
 	if (!hasCode(error, 1)) {

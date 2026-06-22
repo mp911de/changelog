@@ -62,73 +62,13 @@ export async function readOptionalJson<T>(
 
 /**
  * Write atomically via a sibling temp file and rename so an interrupted write cannot truncate
- * the target into invalid JSON. Pretty printing and a trailing newline keep diffs readable. Pass
- * {@code compact: true} for the {@link compactJson} layout (used for hand-edited config files).
+ * the target into invalid JSON. Pretty printing and a trailing newline keep diffs readable.
  */
 export async function writeJsonFile(
 	path: string,
 	value: unknown,
-	options: { compact?: boolean } = {},
 ): Promise<void> {
 	await mkdir(dirname(path), { recursive: true });
-	const text = options.compact ? compactJson(value) : JSON.stringify(value, null, 2);
+	const text = JSON.stringify(value, null, 2);
 	await writeFileAtomically(path, `${text}\n`);
-}
-
-/**
- * Serialize JSON in a compact, review-friendly layout: a value stays on one line when it is a
- * primitive, an array whose elements are all primitives, or an object whose every value is itself
- * inline-able; otherwise it breaks across lines with 2-space indentation, each element or entry
- * formatted recursively. Empty arrays and objects stay inline. The result is standard JSON.
- */
-export function compactJson(value: unknown): string {
-	return formatJson(value, 0);
-}
-
-function formatJson(value: unknown, depth: number): string {
-	const inlined = inlineJson(value);
-	if (inlined !== undefined) {
-		return inlined;
-	}
-	const inner = "  ".repeat(depth + 1);
-	const outer = "  ".repeat(depth);
-	if (Array.isArray(value)) {
-		const items = value.map((item) => `${inner}${formatJson(item, depth + 1)}`);
-		return `[\n${items.join(",\n")}\n${outer}]`;
-	}
-	const entries = Object.entries(value as Record<string, unknown>).map(
-		([key, item]) => `${inner}${JSON.stringify(key)}: ${formatJson(item, depth + 1)}`,
-	);
-	return `{\n${entries.join(",\n")}\n${outer}}`;
-}
-
-/**
- * The single-line form of a value when it is flat enough to inline, otherwise undefined.
- */
-function inlineJson(value: unknown): string | undefined {
-	if (value === null || typeof value !== "object") {
-		return JSON.stringify(value);
-	}
-	if (Array.isArray(value)) {
-		if (value.length === 0) {
-			return "[]";
-		}
-		if (value.every((item) => item === null || typeof item !== "object")) {
-			return `[${value.map((item) => JSON.stringify(item)).join(", ")}]`;
-		}
-		return undefined;
-	}
-	const entries = Object.entries(value as Record<string, unknown>);
-	if (entries.length === 0) {
-		return "{}";
-	}
-	const parts: string[] = [];
-	for (const [key, item] of entries) {
-		const piece = inlineJson(item);
-		if (piece === undefined) {
-			return undefined;
-		}
-		parts.push(`${JSON.stringify(key)}: ${piece}`);
-	}
-	return `{ ${parts.join(", ")} }`;
 }
