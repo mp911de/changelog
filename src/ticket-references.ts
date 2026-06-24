@@ -71,10 +71,11 @@ export interface TicketTarget {
 }
 
 /**
- * The fully-qualified key.
+ * The fully-qualified key for a ticket within a repository. Takes the {@link Repository} whole so
+ * owner and repo cannot be transposed at the call site.
  */
-export function repositoryKey(owner: string, repo: string, id: string): string {
-	return `${owner}/${repo}${id}`;
+export function repositoryKey(repository: Repository, id: string): string {
+	return `${repository.owner}/${repository.repo}${id}`;
 }
 
 /**
@@ -83,10 +84,7 @@ export function repositoryKey(owner: string, repo: string, id: string): string {
  * lookup and cache line up.
  */
 export function targetKey(target: TicketTarget): string {
-	const repository = target.repository;
-	return repository
-		? repositoryKey(repository.owner, repository.repo, target.id)
-		: target.id;
+	return target.repository ? repositoryKey(target.repository, target.id) : target.id;
 }
 
 /**
@@ -129,69 +127,42 @@ export interface LookupTarget {
 }
 
 /**
- * The immutable, aggregated result of Ticket References. For this slice it owns Simple Changelog
- * Candidate selection, per-commit display order, run-wide Ticket Target deduplication, changelog
+ * The immutable, aggregated result of Ticket References, as plain data. It owns Simple Changelog
+ * Candidate selection, per-commit display order, run-wide Ticket Target deduplication, the flagged
  * lookup targets, and oldest-occurrence provenance.
  */
-export interface AggregatedTicketReferences {
+export interface Aggregate {
 	readonly commits: readonly AggregatedCommit[];
-
-	/**
-	 * Deduplicated changelog-purpose Ticket Targets, in commit-discovery (first-appearance) order.
-	 */
-	changelogTargets(): readonly TicketTarget[];
 
 	/**
 	 * Every deduplicated Ticket Target that crosses the lookup seam, each flagged for changelog
 	 * and/or credit, in commit-discovery (first-appearance) order. Demoted and Related references
 	 * are excluded.
 	 */
-	targets(): readonly LookupTarget[];
+	readonly targets: readonly LookupTarget[];
 
 	/**
-	 * The oldest commit that produced an occurrence of {@link target}, for not-found provenance.
+	 * The oldest commit that produced an occurrence of each looked-up target, keyed by
+	 * {@link targetKey}, for not-found provenance.
 	 */
-	provenance(target: TicketTarget): ReferenceCommit | undefined;
+	readonly provenance: ReadonlyMap<string, ReferenceCommit>;
 }
 
 /**
- * The immutable run-wide collection of Ticket Reference occurrences and their originating commits.
- * It exposes one aggregation operation. Its builder is private to {@link collectTicketReferences}.
+ * Aggregate one commit's parser output at a time into the immutable {@link Aggregate}. Commits are
+ * supplied oldest-first so the first sighting of a target is its oldest provenance. When supplied,
+ * {@code currentRepository} canonicalizes explicitly qualified references to the current repository
+ * while their occurrence spelling remains available for display.
  */
-export interface TicketReferences {
-	aggregate(): AggregatedTicketReferences;
-}
-
-/**
- * Collect one commit's parser output at a time through a private builder and return the immutable
- * Ticket References collection. Commits are supplied oldest-first so the first sighting of a target
- * is its oldest provenance. When supplied, {@code currentRepository} canonicalizes explicitly
- * qualified references to the current repository while their occurrence spelling remains available
- * for display.
- */
-export function collectTicketReferences(
-	commits: readonly CommitReferences[],
-	currentRepository?: Repository,
-): TicketReferences {
-	const collected: CommitReferences[] = commits.map((entry) => ({
-		commit: entry.commit,
-		occurrences: [...entry.occurrences],
-	}));
-
-	return {
-		aggregate: () => aggregate(collected, currentRepository),
-	};
-}
-
-function aggregate(
+export function aggregateReferences(
 	collected: readonly CommitReferences[],
-	currentRepository: Repository | undefined,
-): AggregatedTicketReferences {
+	currentRepository?: Repository,
+): Aggregate {
 	// Oldest-first provenance: the first commit that produced a lookup target wins, regardless of
 	// which role caused the lookup.
 	const provenance = new Map<string, ReferenceCommit>();
 	// Run-wide lookup purpose per target. Changelog selection and Credit References are independent,
-	// so a target can accumulate both into `both`.
+	// so a target can accumulate both purposes.
 	const changelog = new Map<string, TicketTarget>();
 	const credit = new Map<string, TicketTarget>();
 
@@ -250,15 +221,7 @@ function aggregate(
 	// Commit-discovery order: each target keeps the position of its first appearance (oldest commit,
 	// textual order within it) and is never reordered by id. A later commit re-citing the same
 	// ticket has already been recorded, so it does not move.
-	const changelogTargets = [...changelog.values()];
-	const lookupTargets = buildLookupTargets(changelog, credit);
-
-	return {
-		commits,
-		changelogTargets: () => changelogTargets,
-		targets: () => lookupTargets,
-		provenance: (target) => provenance.get(targetKey(target)),
-	};
+	return { commits, targets: buildLookupTargets(changelog, credit), provenance };
 }
 
 /**
@@ -298,33 +261,32 @@ function dedupeByKey() {
 	};
 }
 
-// The Reference Qualifiers ordered strongest-first and the single source of truth for ranking.
-// `candidate` marks the tiers that can supply a Changelog Candidate; Related is supporting context
-// only and never becomes one, even when no stronger tier exists.
-const QUALIFIER_ORDER: ReadonlyArray<{
-	qualifier: ReferenceQualifier;
-	candidate: boolean;
-}> = [
-	{ qualifier: "Qualified", candidate: true },
-	{ qualifier: "PullRequest", candidate: true },
-	{ qualifier: "See", candidate: true },
-	{ qualifier: "Related", candidate: false },
-	{ qualifier: "Simple", candidate: true },
-];
+// The Reference Qualifiers with their strength rank (higher is stronger) and candidate eligibility:
+// the single source of truth for ranking. `candidate: false` marks Related as supporting context
+// that never becomes a Changelog Candidate, even when no stronger tier exists. `satisfies Record`
+// makes a missing qualifier a compile error, so ranking can never silently yield undefined.
+const QUALIFIERS = {
+	Qualified: { rank: 4, candidate: true },
+	PullRequest: { rank: 3, candidate: true },
+	See: { rank: 2, candidate: true },
+	Related: { rank: 1, candidate: false },
+	Simple: { rank: 0, candidate: true },
+} satisfies Record<ReferenceQualifier, { rank: number; candidate: boolean }>;
 
-// Strength rank per qualifier (higher is stronger), derived from QUALIFIER_ORDER so the parser's
-// overlap resolution and candidate-tier selection share one ordering.
-export const qualifierRank = Object.fromEntries(
-	QUALIFIER_ORDER.map(({ qualifier }, index) => [
-		qualifier,
-		QUALIFIER_ORDER.length - 1 - index,
-	]),
-) as Record<ReferenceQualifier, number>;
+/**
+ * Strength rank for a Reference Qualifier (higher is stronger): the parser's overlap resolution and
+ * candidate-tier selection share this one ordering.
+ */
+export function qualifierRank(qualifier: ReferenceQualifier): number {
+	return QUALIFIERS[qualifier].rank;
+}
 
-// Candidate quality tiers, strongest first, filtered from the shared order.
-const CANDIDATE_TIERS: readonly ReferenceQualifier[] = QUALIFIER_ORDER.filter(
-	(entry) => entry.candidate,
-).map((entry) => entry.qualifier);
+// Candidate quality tiers, strongest first, derived from the shared table.
+const CANDIDATE_TIERS: readonly ReferenceQualifier[] = (
+	Object.keys(QUALIFIERS) as ReferenceQualifier[]
+)
+	.filter((qualifier) => QUALIFIERS[qualifier].candidate)
+	.sort((left, right) => QUALIFIERS[right].rank - QUALIFIERS[left].rank);
 
 /**
  * The highest non-empty candidate tier for one commit's occurrences, or {@code undefined} when the

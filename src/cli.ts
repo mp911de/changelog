@@ -23,38 +23,29 @@ import { fileURLToPath, pathToFileURL } from "node:url";
 
 import { Command, InvalidArgumentError } from "commander";
 
-import { parseArtifactVersion } from "./artifact-version.js";
 import { writeFileAtomically } from "./atomic-file.js";
 import { loadCache, type TicketCache } from "./cache.js";
 import { loadOrCreateConfig } from "./config.js";
-import { hasCode } from "./errors.js";
+import { hasCode, hasStringProp } from "./errors.js";
 import { classifyRef, gitRepoRefs, resolveCommit } from "./git.js";
-import { resolveGitHubContext } from "./github-context.js";
+import { type Repository, resolveGitHubContext } from "./github-context.js";
+import { headerFields } from "./links.js";
 import { createTargetLookup } from "./lookup.js";
 import { type Lookup, runPipeline } from "./pipeline.js";
 import { noRunProgress, type RunProgress, runStage } from "./progress.js";
 import { createRenderer, createTraceWriter, type OutputStream } from "./render.js";
-import { resolveAutoRange } from "./version.js";
+import { type CliRange, parseRange, resolveAutoRange } from "./version.js";
 import {
 	type CommitDetail,
 	createDebugView,
+	createPreparingView,
 	createRunView,
 	finalLine,
-	headerFields,
 	type RunViewOptions,
 } from "./view.js";
 
 const require = createRequire(import.meta.url);
 const pkg = require("../package.json") as { version: string };
-
-/**
- * A lone version is the release target (auto mode); the lower bound is resolved from tags and the
- * upper bound is the matching tag or HEAD. Two arguments or a `<from>..<to>` range supply both
- * bounds explicitly.
- */
-type CliRange =
-	| { readonly mode: "auto"; readonly target: string }
-	| { readonly mode: "explicit"; readonly from: string; readonly to: string };
 
 interface CliInvocation {
 	readonly range: CliRange;
@@ -140,49 +131,6 @@ const defaultGitHubAdapter: GitHubAdapterFactory = async ({
 	};
 };
 
-/**
- * Interpret the positional arguments. A lone version is the release target (auto mode); two
- * arguments or a `<from>..<to>` range supply explicit bounds. Git refnames cannot contain "..", so
- * splitting on it is unambiguous; the range and a separate `to` are mutually exclusive.
- */
-function parseRange(from: string, to: string | undefined): CliRange {
-	if (!from.includes("..")) {
-		if (to !== undefined) {
-			return { mode: "explicit", from, to };
-		}
-		if (parseArtifactVersion(from) === null) {
-			throw new InvalidArgumentError(
-				`"${from}" is not a recognized version; pass <from> <to> or a <from>..<to> range`,
-			);
-		}
-		return { mode: "auto", target: from };
-	}
-	if (to !== undefined) {
-		throw new InvalidArgumentError(
-			"specify the range once: either <from>..<to> or <from> <to>, not both",
-		);
-	}
-	if (from.includes("...")) {
-		throw new InvalidArgumentError(
-			`invalid range "${from}": use two dots, e.g. 4.0.0..4.0.4`,
-		);
-	}
-	if (from.indexOf("..") !== from.lastIndexOf("..")) {
-		throw new InvalidArgumentError(
-			`invalid range "${from}": use a single <from>..<to>`,
-		);
-	}
-	const separator = from.indexOf("..");
-	const lower = from.slice(0, separator);
-	const upper = from.slice(separator + 2);
-	if (lower === "") {
-		throw new InvalidArgumentError(
-			`invalid range "${from}": missing <from> before ".."`,
-		);
-	}
-	return { mode: "explicit", from: lower, to: upper === "" ? "HEAD" : upper };
-}
-
 function buildProgram(
 	action: (invocation: CliInvocation) => Promise<void>,
 	options?: { readonly baseCwd?: string },
@@ -263,6 +211,9 @@ function buildProgram(
 			async (
 				target: string,
 				to: string | undefined,
+				// Commander types its parsed options loosely; this annotation mirrors the .option()
+				// declarations above (flag names mapped to their camelCase keys) and is not verified by
+				// commander, so it must be kept in step with them by hand.
 				opts: Omit<CliInvocation, "range" | "cwd"> & { C?: string },
 			) => {
 				const { C: directory, ...invocation } = opts;
@@ -305,22 +256,17 @@ function commitDetailOf(invocation: CliInvocation): CommitDetail {
 	return "none";
 }
 
-// The run view's options are filled in during Preparing (the resolved repository), so they stay
-// mutable here even though the view reads them as readonly.
-type MutableRunViewOptions = {
-	-readonly [K in keyof RunViewOptions]: RunViewOptions[K];
-};
-
 /**
- * Everything the run needs to present itself, resolved once from the invocation: where progress is
- * reported (full view, debug-only, or silent), the renderer the header and final line use, the run
- * view options to fill in after Preparing, and where the finished changelog is written.
+ * Everything the run needs to present itself, resolved once from the invocation: the renderer the
+ * header and final line use, the Preparing progress sink (which runs before the repository is known),
+ * a factory for the run's progress sink once Preparing resolves the repository, and where the
+ * finished changelog is written.
  */
 interface Presentation {
 	readonly renderer: ReturnType<typeof createRenderer> | undefined;
-	readonly runViewOptions: MutableRunViewOptions;
-	readonly progress: RunProgress;
+	readonly preparing: RunProgress;
 	readonly outputUrl: string;
+	runProgress(repo: Repository): RunProgress;
 	write(markdown: string): Promise<void>;
 }
 
@@ -338,17 +284,22 @@ function resolvePresentation(
 	const toStdout = invocation.output === "-";
 	// -O - writes the changelog to stdout, so the run view stays off it; -q silences it outright.
 	const renderer = invocation.quiet || toStdout ? undefined : createRenderer(out);
-	const runViewOptions: MutableRunViewOptions = {
-		repo: { owner: "", repo: "" },
+	const viewOptions: RunViewOptions = {
 		commitDetail: commitDetailOf(invocation),
 		showLookupOutcomes: invocation.showAll,
 		debug: invocation.debug,
 	};
-	const progress: RunProgress = renderer
-		? createRunView(renderer, runViewOptions)
-		: invocation.debug
+	// Without a renderer, --debug still traces to stderr and anything else is silent; this fallback
+	// serves both Preparing and the pipeline in that case. With a renderer the view is built per phase.
+	const fallback: RunProgress =
+		!renderer && invocation.debug
 			? createDebugView(createTraceWriter(err))
 			: noRunProgress;
+	const preparing = renderer
+		? createPreparingView(renderer, invocation.debug)
+		: fallback;
+	const runProgress = (repo: Repository): RunProgress =>
+		renderer ? createRunView(renderer, repo, viewOptions) : fallback;
 
 	const absoluteOutput = toStdout
 		? undefined
@@ -359,9 +310,9 @@ function resolvePresentation(
 
 	return {
 		renderer,
-		runViewOptions,
-		progress,
+		preparing,
 		outputUrl,
+		runProgress,
 		async write(markdown) {
 			if (absoluteOutput === undefined) {
 				out.write(markdown);
@@ -391,15 +342,13 @@ async function execute(
 		return;
 	}
 
-	// The full view reads its options at emit time, so the repository resolved during Preparing can
-	// be filled into runViewOptions before any row that needs its links is rendered.
-	const { renderer, runViewOptions, progress, outputUrl, write } = resolvePresentation(
+	const { renderer, preparing, outputUrl, runProgress, write } = resolvePresentation(
 		invocation,
 		runtime,
 	);
 	try {
 		const prepared = await runStage(
-			progress,
+			preparing,
 			"Preparing",
 			async (debug) => {
 				const trace = invocation.debug ? debug : undefined;
@@ -462,9 +411,11 @@ async function execute(
 		const { repo, from, to, fromKind, toKind, fromSha, toSha, config, lookup } =
 			prepared;
 
+		// The repository is now known, so the run view can be built with it: no mutation of options
+		// after construction, and Preparing has already completed on its own sink.
+		const progress = runProgress(repo);
+
 		if (renderer) {
-			// The full view needs the resolved repository for its commit and ticket links.
-			runViewOptions.repo = repo;
 			renderer.headerBox(
 				headerFields({
 					repo,
@@ -506,9 +457,7 @@ function isCommanderError(error: unknown): error is {
 	exitCode?: number;
 } & Error {
 	return (
-		typeof error === "object" &&
-		error !== null &&
-		typeof (error as { code?: unknown }).code === "string" &&
+		hasStringProp(error, "code") &&
 		(error as { code: string }).code.startsWith("commander.")
 	);
 }

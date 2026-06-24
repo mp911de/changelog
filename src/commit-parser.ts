@@ -47,6 +47,18 @@ const RELATED_TICKET = `(?:(?:Related (?:tickets|ticket))|(?:Ticket)|(?:Related)
 // matches. Case-insensitivity comes from the `i` flag applied where this pattern runs.
 const PULL_REQUEST = `(?:Original\\s+)?(?:pull request|PR|pullrequest)[:]*(?:\\s+)?${TICKET_ALTERNATION}`;
 
+/**
+ * A required capture group: throw rather than silently miscapture when an alternation branch matched
+ * but the expected group did not, turning a regex/code mismatch into a diagnosable error.
+ */
+function group(match: RegExpExecArray, index: number): string {
+	const value = match[index];
+	if (value === undefined) {
+		throw new Error(`expected capture group ${index} in "${match[0]}"`);
+	}
+	return value;
+}
+
 const QUALIFIED_MATCH = new RegExp(`^${GITHUB_QUALIFIED_TICKET}$`, "i");
 const URL_QUALIFIED_MATCH = new RegExp(`^${GITHUB_URL_QUALIFIED_TICKET}$`, "i");
 const TICKET_MATCH = new RegExp(`^${GITHUB_TICKET}$`, "i");
@@ -87,7 +99,7 @@ export function parseReferenceOccurrences(message: string): ReferenceOccurrence[
 		match = ANY_TICKET_SCAN.exec(message)
 	) {
 		const occurrence = extractOccurrence(
-			match[1]!,
+			group(match, 1),
 			qualifiers.get(match.index) ?? "Simple",
 		);
 		if (occurrence) {
@@ -117,7 +129,7 @@ function qualifierByPosition(message: string): Map<number, ReferenceQualifier> {
 				const current = byPosition.get(position);
 				if (
 					current === undefined ||
-					qualifierRank[qualifier] > qualifierRank[current]
+					qualifierRank(qualifier) > qualifierRank(current)
 				) {
 					byPosition.set(position, qualifier);
 				}
@@ -135,17 +147,17 @@ function extractOccurrence(
 
 	const url = URL_QUALIFIED_MATCH.exec(trimmed);
 	if (url) {
-		return referenceOccurrence(`#${url[3]}`, qualifier, {
-			owner: url[1]!,
-			repo: url[2]!,
+		return referenceOccurrence(`#${group(url, 3)}`, qualifier, {
+			owner: group(url, 1),
+			repo: group(url, 2),
 		});
 	}
 
 	const qualified = QUALIFIED_MATCH.exec(trimmed);
 	if (qualified) {
-		return referenceOccurrence(qualified[3]!, qualifier, {
-			owner: qualified[1]!,
-			repo: qualified[2]!,
+		return referenceOccurrence(group(qualified, 3), qualifier, {
+			owner: group(qualified, 1),
+			repo: group(qualified, 2),
 		});
 	}
 

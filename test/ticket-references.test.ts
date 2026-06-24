@@ -17,7 +17,8 @@
 import { describe, expect, it } from "vitest";
 
 import {
-	collectTicketReferences,
+	type Aggregate,
+	aggregateReferences,
 	type ReferenceCommit,
 	type ReferenceOccurrence,
 	referenceOccurrence,
@@ -40,7 +41,15 @@ function aggregateOf(
 		occurrences: readonly ReferenceOccurrence[];
 	}[],
 ) {
-	return collectTicketReferences(commits).aggregate();
+	return aggregateReferences(commits);
+}
+
+// The deduplicated changelog-purpose targets, in commit-discovery order: derived here from the
+// flagged lookup targets the way the pipeline does, so the assertions below read as before.
+function changelogTargets(aggregate: Aggregate): readonly TicketTarget[] {
+	return aggregate.targets
+		.filter((flagged) => flagged.changelog)
+		.map((flagged) => flagged.target);
 }
 
 describe("aggregated Ticket References (Simple path)", () => {
@@ -70,7 +79,7 @@ describe("aggregated Ticket References (Simple path)", () => {
 			},
 		]);
 
-		const targets = aggregate.changelogTargets();
+		const targets = changelogTargets(aggregate);
 		expect(targets).toHaveLength(1);
 		expect(targets[0]?.id).toBe("#1234");
 
@@ -89,7 +98,7 @@ describe("aggregated Ticket References (Simple path)", () => {
 		]);
 
 		expect(aggregate.commits[0]?.candidates.map(label)).toEqual(["#1234"]);
-		expect(aggregate.changelogTargets()).toHaveLength(1);
+		expect(changelogTargets(aggregate)).toHaveLength(1);
 	});
 
 	it("identifies a Ticket Target by repository plus ticket number", () => {
@@ -106,7 +115,7 @@ describe("aggregated Ticket References (Simple path)", () => {
 			},
 		]);
 
-		const targets = aggregate.changelogTargets();
+		const targets = changelogTargets(aggregate);
 		expect(targets).toHaveLength(2);
 		expect(targets.map((target) => targetKey(target)).sort()).toEqual([
 			"#1",
@@ -116,7 +125,7 @@ describe("aggregated Ticket References (Simple path)", () => {
 
 	it("collapses a qualified current-repository reference into the local Ticket Target", () => {
 		const current = { owner: "octo", repo: "widgets" };
-		const aggregate = collectTicketReferences(
+		const aggregate = aggregateReferences(
 			[
 				{
 					commit: commit("aaa"),
@@ -133,9 +142,9 @@ describe("aggregated Ticket References (Simple path)", () => {
 				},
 			],
 			current,
-		).aggregate();
+		);
 
-		expect(aggregate.changelogTargets().map(targetKey)).toEqual(["#12"]);
+		expect(changelogTargets(aggregate).map(targetKey)).toEqual(["#12"]);
 		// Both the bare and the qualified current-repository reference collapse to the local key.
 		expect(aggregate.commits[0]?.candidates.map(label)).toEqual(["#12"]);
 		expect(aggregate.commits[1]?.candidates.map(label)).toEqual(["#12"]);
@@ -168,8 +177,8 @@ describe("aggregated Ticket References (Simple path)", () => {
 			},
 		]);
 
-		const [target] = aggregate.changelogTargets();
-		const provenance = aggregate.provenance(target!);
+		const [target] = changelogTargets(aggregate);
+		const provenance = aggregate.provenance.get(targetKey(target!));
 		expect(provenance?.sha).toBe("old");
 		expect(provenance?.summary).toBe("Oldest sighting");
 	});
@@ -191,7 +200,7 @@ describe("aggregated Ticket References (candidate ranking)", () => {
 		expect(first?.candidates.map(label)).toEqual(["#20"]);
 		expect(label(first?.lead)).toBe("#20");
 
-		expect(aggregate.changelogTargets().map((target) => target.id)).toEqual(["#20"]);
+		expect(changelogTargets(aggregate).map((target) => target.id)).toEqual(["#20"]);
 	});
 
 	it("selects PullRequest references over Simple ones when no Qualified reference exists", () => {
@@ -206,7 +215,7 @@ describe("aggregated Ticket References (candidate ranking)", () => {
 		]);
 
 		expect(aggregate.commits[0]?.candidates.map(label)).toEqual(["#20"]);
-		expect(aggregate.changelogTargets().map((target) => target.id)).toEqual(["#20"]);
+		expect(changelogTargets(aggregate).map((target) => target.id)).toEqual(["#20"]);
 	});
 
 	it("makes every reference in the highest tier a Changelog Candidate, in textual order", () => {
@@ -224,7 +233,7 @@ describe("aggregated Ticket References (candidate ranking)", () => {
 		expect(aggregate.commits[0]?.candidates.map(label)).toEqual(["#10", "#20"]);
 		expect(label(aggregate.commits[0]?.lead)).toBe("#10");
 
-		expect(aggregate.changelogTargets().map((target) => target.id)).toEqual([
+		expect(changelogTargets(aggregate).map((target) => target.id)).toEqual([
 			"#10",
 			"#20",
 		]);
@@ -243,7 +252,7 @@ describe("aggregated Ticket References (candidate ranking)", () => {
 
 		expect(aggregate.commits[0]?.candidates.map(label)).toEqual(["#10"]);
 		expect(aggregate.commits[0]?.related.map(label)).toEqual(["#20"]);
-		expect(aggregate.changelogTargets().map((target) => target.id)).toEqual(["#10"]);
+		expect(changelogTargets(aggregate).map((target) => target.id)).toEqual(["#10"]);
 	});
 
 	it("never makes a Related-only commit's reference a Changelog Candidate", () => {
@@ -257,7 +266,7 @@ describe("aggregated Ticket References (candidate ranking)", () => {
 		expect(aggregate.commits[0]?.candidates).toEqual([]);
 		expect(aggregate.commits[0]?.lead).toBeUndefined();
 		expect(aggregate.commits[0]?.related.map(label)).toEqual(["#10"]);
-		expect(aggregate.changelogTargets()).toEqual([]);
+		expect(changelogTargets(aggregate)).toEqual([]);
 	});
 
 	it("selects a See reference over a bare Simple reference in the same commit", () => {
@@ -274,7 +283,7 @@ describe("aggregated Ticket References (candidate ranking)", () => {
 		expect(aggregate.commits[0]?.candidates.map(label)).toEqual(["#20"]);
 		expect(label(aggregate.commits[0]?.lead)).toBe("#20");
 		expect(aggregate.commits[0]?.demoted.map(label)).toEqual(["#10"]);
-		expect(aggregate.changelogTargets().map((target) => target.id)).toEqual(["#20"]);
+		expect(changelogTargets(aggregate).map((target) => target.id)).toEqual(["#20"]);
 	});
 
 	it("keeps the demoted Simple tier out of changelog lookup targets so failure cannot promote it", () => {
@@ -288,7 +297,7 @@ describe("aggregated Ticket References (candidate ranking)", () => {
 			},
 		]);
 
-		expect(aggregate.changelogTargets().map((target) => target.id)).toEqual(["#10"]);
+		expect(changelogTargets(aggregate).map((target) => target.id)).toEqual(["#10"]);
 		expect(aggregate.commits[0]?.demoted.map(label)).toEqual(["#20"]);
 	});
 
@@ -305,7 +314,7 @@ describe("aggregated Ticket References (candidate ranking)", () => {
 
 		expect(aggregate.commits[0]?.related.map(label)).toEqual(["#20"]);
 
-		expect(aggregate.changelogTargets().map((target) => target.id)).toEqual(["#10"]);
+		expect(changelogTargets(aggregate).map((target) => target.id)).toEqual(["#10"]);
 	});
 
 	it("makes the lead display-only while every equal-rank candidate still becomes a lookup target", () => {
@@ -322,7 +331,7 @@ describe("aggregated Ticket References (candidate ranking)", () => {
 		expect(label(aggregate.commits[0]?.lead)).toBe("#10");
 		expect(aggregate.commits[0]?.candidates.map(label)).toEqual(["#10", "#20"]);
 
-		expect(aggregate.changelogTargets().map((target) => target.id)).toEqual([
+		expect(changelogTargets(aggregate).map((target) => target.id)).toEqual([
 			"#10",
 			"#20",
 		]);
@@ -344,7 +353,7 @@ describe("aggregated Ticket References (Credit References and lookup purposes)",
 		expect(aggregate.commits[0]?.candidates.map(label)).toEqual(["#10"]);
 		expect(aggregate.commits[0]?.credits.map(label)).toEqual(["#20"]);
 
-		expect(aggregate.targets()).toEqual([
+		expect(aggregate.targets).toEqual([
 			{ target: { id: "#10" }, changelog: true, credit: false },
 			{ target: { id: "#20" }, changelog: false, credit: true },
 		]);
@@ -363,7 +372,7 @@ describe("aggregated Ticket References (Credit References and lookup purposes)",
 
 		expect(aggregate.commits[0]?.candidates.map(label)).toEqual(["#20"]);
 		expect(aggregate.commits[0]?.credits.map(label)).toEqual(["#20"]);
-		expect(aggregate.targets()).toEqual([
+		expect(aggregate.targets).toEqual([
 			{ target: { id: "#20" }, changelog: true, credit: true },
 		]);
 	});
@@ -379,7 +388,7 @@ describe("aggregated Ticket References (Credit References and lookup purposes)",
 			},
 		]);
 
-		const targets = aggregate.targets();
+		const targets = aggregate.targets;
 		expect(targets.map((t) => [t.target.id, t.changelog, t.credit])).toEqual([
 			["#10", true, false],
 			["#20", false, true],
@@ -398,7 +407,7 @@ describe("aggregated Ticket References (Credit References and lookup purposes)",
 			},
 		]);
 
-		expect(aggregate.targets().map((t) => t.target.id)).toEqual(["#10"]);
+		expect(aggregate.targets.map((t) => t.target.id)).toEqual(["#10"]);
 	});
 
 	it("retains the oldest occurrence as provenance for a credit-only target", () => {
@@ -413,8 +422,8 @@ describe("aggregated Ticket References (Credit References and lookup purposes)",
 			},
 		]);
 
-		const [target] = aggregate.targets();
-		const provenance = aggregate.provenance(target!.target);
+		const [target] = aggregate.targets;
+		const provenance = aggregate.provenance.get(targetKey(target!.target));
 		expect(provenance?.sha).toBe("old");
 		expect(provenance?.summary).toBe("Oldest credit sighting");
 	});

@@ -654,7 +654,7 @@ describe("live reporter", () => {
 	});
 
 	it("clips by terminal width without splitting wide graphemes", () => {
-		const { stream, get } = capture({ isTTY: true, columns: 9 });
+		const { stream, get } = capture({ isTTY: true, columns: 8 });
 		const step = createRenderer(stream, {
 			capabilities: { level: 0, tty: true, hyperlinks: false },
 			durations: false,

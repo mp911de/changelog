@@ -17,6 +17,7 @@
 import { describe, expect, it } from "vitest";
 
 import type { RefKind } from "../src/git.js";
+import { headerFields } from "../src/links.js";
 import type { RunProgressEvent } from "../src/progress.js";
 import type {
 	BlockHandle,
@@ -28,15 +29,15 @@ import type {
 } from "../src/render.js";
 import { resolveTicketReferences } from "../src/resolved-references.js";
 import {
-	collectTicketReferences,
+	aggregateReferences,
 	type CommitReferences,
 	referenceOccurrence,
 } from "../src/ticket-references.js";
 import {
 	createDebugView,
+	createPreparingView,
 	createRunView,
 	finalLine,
-	headerFields,
 	type RunViewOptions,
 } from "../src/view.js";
 
@@ -167,7 +168,7 @@ function summaryText(summary: StepSummary | undefined): {
 }
 
 function commits(entries: readonly CommitReferences[]) {
-	return collectTicketReferences(entries).aggregate();
+	return aggregateReferences(entries);
 }
 
 describe("createRunView", () => {
@@ -202,13 +203,12 @@ describe("createRunView", () => {
 	function run(
 		events: RunProgressEvent[],
 		options: RunViewOptions = {
-			repo,
 			commitDetail: "none",
 			showLookupOutcomes: false,
 		},
 	) {
 		const renderer = mockRenderer();
-		const view = createRunView(renderer, options);
+		const view = createRunView(renderer, repo, options);
 		for (const event of events) {
 			view.emit(event);
 		}
@@ -225,7 +225,6 @@ describe("createRunView", () => {
 		expect(run(events).blocks[0]?.debug).toEqual([]);
 
 		const debugView = run(events, {
-			repo,
 			commitDetail: "none",
 			showLookupOutcomes: false,
 			debug: true,
@@ -337,7 +336,7 @@ describe("createRunView", () => {
 				{ type: "stage-start", stage: "Scanning" },
 				{ type: "scanning-complete", stage: "Scanning", commits: 2, aggregate },
 			],
-			{ repo, commitDetail: "missing", showLookupOutcomes: false },
+			{ commitDetail: "missing", showLookupOutcomes: false },
 		);
 		const rows = renderer.blocks[0]?.summary?.commitRows ?? [];
 		expect(rows).toHaveLength(1);
@@ -351,7 +350,7 @@ describe("createRunView", () => {
 				{ type: "stage-start", stage: "Scanning" },
 				{ type: "scanning-complete", stage: "Scanning", commits: 2, aggregate },
 			],
-			{ repo, commitDetail: "all", showLookupOutcomes: false },
+			{ commitDetail: "all", showLookupOutcomes: false },
 		);
 		expect(renderer.blocks[0]?.summary?.commitRows).toHaveLength(2);
 	});
@@ -364,7 +363,6 @@ describe("createRunView", () => {
 				{ type: "scanning-complete", stage: "Scanning", commits: 1, aggregate },
 			],
 			{
-				repo,
 				commitDetail: "all",
 				showLookupOutcomes: false,
 			},
@@ -545,7 +543,6 @@ describe("createRunView", () => {
 		// show-all: a warning count, with the excluded references listed as accent like the
 		// looked-up ones. The excluded target is outside the looked-up title count.
 		const verbose = run(events, {
-			repo,
 			commitDetail: "all",
 			showLookupOutcomes: true,
 		}).blocks[0]?.summary;
@@ -609,7 +606,7 @@ describe("createRunView", () => {
 					resolved: resolvedWithCredit,
 				},
 			],
-			{ repo, commitDetail: "all", showLookupOutcomes: true },
+			{ commitDetail: "all", showLookupOutcomes: true },
 		);
 		const lookedUp = summaryText(renderer.blocks[0]?.summary);
 		expect(resolvedWithCredit.entries).toHaveLength(1);
@@ -659,7 +656,7 @@ describe("createRunView", () => {
 					resolved: failingResolved,
 				},
 			],
-			{ repo, commitDetail: "all", showLookupOutcomes: true },
+			{ commitDetail: "all", showLookupOutcomes: true },
 		);
 		const summary = renderer.blocks[0]?.summary;
 
@@ -700,7 +697,7 @@ describe("createRunView", () => {
 		]);
 		const failingResolved = resolveTicketReferences(failing, {
 			facts: new Map(),
-			notFoundTargets: failing.targets().map((purposed) => purposed.target),
+			notFoundTargets: failing.targets.map((purposed) => purposed.target),
 			cached: 0,
 			fetched: 0,
 		});
@@ -741,16 +738,20 @@ describe("createRunView", () => {
 			{ type: "preparing-complete", stage: "Preparing" },
 		];
 
-		const plain = run(events);
+		const prepare = (debug: boolean) => {
+			const renderer = mockRenderer();
+			const view = createPreparingView(renderer, debug);
+			for (const event of events) {
+				view.emit(event);
+			}
+			return renderer;
+		};
+
+		const plain = prepare(false);
 		expect(plain.blocks[0]?.summary).toBeUndefined();
 		expect(plain.blocks[0]?.discarded).toBe(true);
 
-		const debugView = run(events, {
-			repo,
-			commitDetail: "none",
-			showLookupOutcomes: false,
-			debug: true,
-		});
+		const debugView = prepare(true);
 		expect(text(debugView.blocks[0]?.summary?.title ?? [])).toBe("Prepared context");
 		expect(debugView.blocks[0]?.discarded).toBeUndefined();
 	});
@@ -771,7 +772,7 @@ describe("createRunView", () => {
 				{ type: "stage-debug", stage: "Scanning", line: "git log a..b" },
 				{ type: "scanning-complete", stage: "Scanning", commits: 2, aggregate },
 			],
-			{ repo, commitDetail: "none", showLookupOutcomes: false, debug: true },
+			{ commitDetail: "none", showLookupOutcomes: false, debug: true },
 		);
 		expect(renderer.blocks[0]?.debug).toEqual(["git log a..b"]);
 	});

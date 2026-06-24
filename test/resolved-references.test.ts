@@ -19,7 +19,7 @@ import { describe, expect, it } from "vitest";
 import type { ResolvedTicket } from "../src/lookup.js";
 import { resolveTicketReferences } from "../src/resolved-references.js";
 import {
-	collectTicketReferences,
+	aggregateReferences,
 	type ReferenceCommit,
 	type ReferenceOccurrence,
 	referenceOccurrence,
@@ -37,7 +37,7 @@ function aggregateOf(
 		occurrences: readonly ReferenceOccurrence[];
 	}[],
 ) {
-	return collectTicketReferences(commits).aggregate();
+	return aggregateReferences(commits);
 }
 
 function ticket(extra: Partial<ResolvedTicket> = {}): ResolvedTicket {
@@ -86,7 +86,7 @@ describe("resolveTicketReferences", () => {
 		);
 
 		// The excluded cross-repository target is held out of lookup and produces no entry.
-		expect(resolved.excluded.map((t) => targetKey(t.target))).toEqual([
+		expect(resolved.excluded.map((target) => targetKey(target))).toEqual([
 			"forbidden/repo#9",
 		]);
 		expect(resolved.lookedUp.map((t) => targetKey(t.target))).toEqual(["#1"]);

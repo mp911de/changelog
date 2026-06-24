@@ -14,26 +14,22 @@
  * limitations under the License.
  */
 
+// Read a property off an unknown error-like value without asserting its shape, the one place the
+// `typeof object` / non-null guard lives for the predicates below.
+function prop(error: unknown, key: string): unknown {
+	return typeof error === "object" && error !== null
+		? (error as Record<string, unknown>)[key]
+		: undefined;
+}
+
 export function hasCode(error: unknown, code: string | number): boolean {
-	return (
-		typeof error === "object" &&
-		error !== null &&
-		(
-			error as {
-				code?: unknown;
-			}
-		).code === code
-	);
+	return prop(error, "code") === code;
 }
 
 export function hasStatus(error: unknown, status: number): boolean {
-	return (
-		typeof error === "object" &&
-		error !== null &&
-		(
-			error as {
-				status?: unknown;
-			}
-		).status === status
-	);
+	return prop(error, "status") === status;
+}
+
+export function hasStringProp(error: unknown, key: string): boolean {
+	return typeof prop(error, key) === "string";
 }

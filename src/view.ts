@@ -14,11 +14,10 @@
  * limitations under the License.
  */
 
-import type { RefKind } from "./git.js";
 import type { Repository } from "./github-context.js";
+import { commitUrl, ticketUrl } from "./links.js";
 import type { GenerationSummary, RunProgress } from "./progress.js";
 import type {
-	ExcludedTarget,
 	LookedUpTarget,
 	NotFoundTarget,
 	ResolvedTicketReferences,
@@ -29,35 +28,18 @@ import type {
 	CommitRow,
 	Emphasis,
 	ExcludedSection,
-	HeaderFields,
 	ReferenceItem,
 	Renderer,
 	Row,
 	StepSummary,
 } from "./render.js";
 import {
+	type Aggregate,
 	type AggregatedCommit,
-	type AggregatedTicketReferences,
 	type CommitCandidate,
 	targetKey,
 	type TicketTarget,
 } from "./ticket-references.js";
-
-const GITHUB = "https://github.com";
-
-function repoUrl(repo: Repository, path = ""): string {
-	return `${GITHUB}/${repo.owner}/${repo.repo}${path}`;
-}
-
-function commitUrl(repo: Repository, sha: string): string {
-	return repoUrl(repo, `/commit/${sha}`);
-}
-
-// GitHub redirects /issues/<n> to /pull/<n> for pull requests, so one form links both.
-function ticketUrl(repo: Repository, target: TicketTarget): string {
-	const number = target.id.replace(/^#/, "");
-	return repoUrl(target.repository ?? repo, `/issues/${number}`);
-}
 
 function plural(count: number, singular: string, plural = `${singular}s`): string {
 	return count === 1 ? singular : plural;
@@ -68,12 +50,19 @@ function countCell(value: number, style: Cell["style"]): Cell {
 	return { text: String(value), style };
 }
 
-function scannedTitle(commits: number): Cell[] {
+// A block title: a verb, an accent count, and the pluralized noun (e.g. "Scanned 3 commits").
+function titleLine(verb: string, count: number, noun: string, plurals?: string): Cell[] {
 	return [
-		{ text: "Scanned " },
-		countCell(commits, "accent"),
-		{ text: ` ${plural(commits, "commit")}` },
+		{ text: `${verb} ` },
+		countCell(count, "accent"),
+		{ text: ` ${plural(count, noun, plurals)}` },
 	];
+}
+
+// A fact line: an accent (or warning) count followed by its faint label, the recurring shape of the
+// Scanned and Looked up block notes.
+function factLine(count: number, label: string, style: Cell["style"] = "accent"): Cell[] {
+	return [countCell(count, style), { text: label, style: "faint" }];
 }
 
 /**
@@ -96,32 +85,30 @@ interface ScannedSummary {
 function scannedFacts(summary: ScannedSummary): Cell[][] {
 	const notes: Cell[][] = [];
 	if (summary.uniqueTargets > 0) {
-		notes.push([
-			countCell(summary.uniqueTargets, "accent"),
-			{
-				text: ` unique ${plural(summary.uniqueTargets, "ticket reference")}`,
-				style: "faint",
-			},
-		]);
+		notes.push(
+			factLine(
+				summary.uniqueTargets,
+				` unique ${plural(summary.uniqueTargets, "ticket reference")}`,
+			),
+		);
 	}
 	if (summary.pullRequestTargets > 0) {
-		notes.push([
-			countCell(summary.pullRequestTargets, "accent"),
-			{
-				text: ` pull request ${plural(summary.pullRequestTargets, "reference")}`,
-				style: "faint",
-			},
-		]);
+		notes.push(
+			factLine(
+				summary.pullRequestTargets,
+				` pull request ${plural(summary.pullRequestTargets, "reference")}`,
+			),
+		);
 	}
 	if (summary.missing > 0) {
 		// A ticketless commit is a release-readiness concern, so point at the flag that lists them.
-		notes.push([
-			countCell(summary.missing, "warning"),
-			{
-				text: ` without ${plural(summary.missing, "ticket reference")} (re-run with --show-missing)`,
-				style: "faint",
-			},
-		]);
+		notes.push(
+			factLine(
+				summary.missing,
+				` without ${plural(summary.missing, "ticket reference")} (re-run with --show-missing)`,
+				"warning",
+			),
+		);
 	}
 	return notes;
 }
@@ -195,14 +182,6 @@ function commitRows(commits: readonly ScannedRow[], repo: Repository): CommitRow
 	});
 }
 
-function lookedUpTitle(resolved: number): Cell[] {
-	return [
-		{ text: "Looked up " },
-		countCell(resolved, "accent"),
-		{ text: ` ${plural(resolved, "ticket")}` },
-	];
-}
-
 /**
  * Cache provenance shown as block items: how many tickets were served from the local cache vs.
  * loaded from GitHub. Both counts use the accent so the number stands out from its faint
@@ -211,22 +190,10 @@ function lookedUpTitle(resolved: number): Cell[] {
 function lookupNotes(cached: number, fetched: number): Cell[][] {
 	const notes: Cell[][] = [];
 	if (cached > 0) {
-		notes.push([
-			countCell(cached, "accent"),
-			{
-				text: " cached",
-				style: "faint",
-			},
-		]);
+		notes.push(factLine(cached, " cached"));
 	}
 	if (fetched > 0) {
-		notes.push([
-			countCell(fetched, "accent"),
-			{
-				text: " fetched",
-				style: "faint",
-			},
-		]);
+		notes.push(factLine(fetched, " fetched"));
 	}
 	return notes;
 }
@@ -263,14 +230,6 @@ function notFoundRows(references: readonly NotFoundTarget[], repo: Repository): 
 			{ text: failure.commit.summary, style: "faint" },
 		],
 	}));
-}
-
-function generatedTitle(entries: number): Cell[] {
-	return [
-		{ text: "Documented " },
-		countCell(entries, "accent"),
-		{ text: ` ${plural(entries, "entry", "entries")}` },
-	];
 }
 
 /**
@@ -327,91 +286,12 @@ export function finalLine(output: string, outputUrl: string): Cell[] {
 	return [{ text: "Created " }, { text: output, link: outputUrl }];
 }
 
-function treeUrl(repo: Repository, ref: string): string {
-	return repoUrl(repo, `/tree/${ref}`);
-}
-
-function tagUrl(repo: Repository, ref: string): string {
-	return repoUrl(repo, `/releases/tag/${ref}`);
-}
-
-/**
- * Link a from/to revision to its GitHub page from its git-resolved {@link RefKind}: a tag's release
- * page, a branch's tree, a plain commit, or HEAD (resolved to its head commit).
- */
-function refUrl(
-	repo: Repository,
-	ref: string,
-	kind: RefKind,
-	resolvedSha: string,
-): string {
-	switch (kind) {
-		case "head":
-			return commitUrl(repo, resolvedSha);
-		case "commit":
-			return commitUrl(repo, ref);
-		case "branch":
-			return treeUrl(repo, ref);
-		case "tag":
-			return tagUrl(repo, ref);
-	}
-}
-
-export interface HeaderParams {
-	readonly repo: Repository;
-	readonly version: string;
-	readonly from: string;
-	readonly to: string;
-	// Git-resolved kinds of `from`/`to`, used to point each link at the right GitHub page.
-	readonly fromKind: RefKind;
-	readonly toKind: RefKind;
-	// Full sha of `from`, resolved only when `from` is HEAD; `toSha` is always the head of the range.
-	readonly fromSha: string;
-	readonly toSha: string;
-	readonly output: string;
-	readonly outputUrl: string;
-}
-
-/**
- * Build the header box fields, linking the from/to revisions and the resolved range sha.
- */
-export function headerFields(params: HeaderParams): HeaderFields {
-	const { repo } = params;
-	return {
-		repoName: repo.repo,
-		repoUrl: repoUrl(repo),
-		version: params.version,
-		repository: [{ text: `${repo.owner}/${repo.repo}`, link: repoUrl(repo) }],
-		range: [
-			{
-				text: params.from,
-				link: refUrl(repo, params.from, params.fromKind, params.fromSha),
-			},
-			{ text: ".." },
-			{
-				text: params.to,
-				link: refUrl(repo, params.to, params.toKind, params.toSha),
-			},
-			{ text: " (", style: "faint" },
-			{
-				text: params.toSha.slice(0, 7),
-				style: "faint",
-				link: commitUrl(repo, params.toSha),
-			},
-			{ text: ")", style: "faint" },
-		],
-		output: [{ text: params.output, link: params.outputUrl }],
-	};
-}
-
 /**
  * How much commit detail the Scanned block lists, normalized by the CLI before the run lifecycle.
  */
 export type CommitDetail = "none" | "missing" | "all";
 
 export interface RunViewOptions {
-	readonly repo: Repository;
-
 	readonly commitDetail: CommitDetail;
 
 	readonly showLookupOutcomes: boolean;
@@ -420,18 +300,23 @@ export interface RunViewOptions {
 }
 
 /**
- * Build a Run Progress sink that renders the full run view. It translates ordered semantic events
- * into renderer block lifecycle calls and accumulates run facts so the Generating block can render
- * the stats ledger. Preparing shows a spinner while it runs but completes silently outside debug
- * mode, so the visible view opens at the header box; the CLI decides whether to use this view at all.
+ * Build a Run Progress sink that renders the full run view, linking commits and tickets against
+ * {@code repo} (resolved before the view is built). It translates ordered semantic events into
+ * renderer block lifecycle calls and accumulates run facts so the Generating block can render the
+ * stats ledger. It opens at Scanning; the repo-free Preparing stage is rendered by
+ * {@link createPreparingView} before this view is built. The CLI decides whether to use it at all.
  */
-export function createRunView(renderer: Renderer, options: RunViewOptions): RunProgress {
+export function createRunView(
+	renderer: Renderer,
+	repo: Repository,
+	options: RunViewOptions,
+): RunProgress {
 	let block: BlockHandle | undefined;
 
 	let scanned:
 		| (ScannedSummary & {
 				commits: number;
-				aggregate: AggregatedTicketReferences;
+				aggregate: Aggregate;
 		  })
 		| undefined;
 	let resolved: ResolvedTicketReferences | undefined;
@@ -451,27 +336,19 @@ export function createRunView(renderer: Renderer, options: RunViewOptions): RunP
 					block?.fail(`${event.stage} failed`);
 					block = undefined;
 					return;
-				case "preparing-complete":
-					if (options.debug) {
-						block?.succeed({ title: [{ text: "Prepared context" }] });
-					} else {
-						block?.discard();
-					}
-					block = undefined;
-					return;
 				case "scanning-complete": {
 					scanned = {
 						commits: event.commits,
 						aggregate: event.aggregate,
 						...scannedSummary(event.aggregate),
 					};
-					block?.succeed(scannedSummaryView(scanned, options));
+					block?.succeed(scannedSummaryView(scanned, repo, options));
 					block = undefined;
 					return;
 				}
 				case "looking-up-complete": {
 					resolved = event.resolved;
-					block?.succeed(lookedUpView(resolved, options));
+					block?.succeed(lookedUpView(resolved, repo, options));
 					block = undefined;
 					return;
 				}
@@ -495,6 +372,42 @@ export function createDebugView(write: (line: string) => void): RunProgress {
 		emit(event) {
 			if (event.type === "stage-debug") {
 				write(event.line);
+			}
+		},
+	};
+}
+
+/**
+ * Build a Run Progress sink for the Preparing stage, which runs before the repository is resolved and
+ * so cannot use the repo-linked {@link createRunView}. It shows the stage spinner and, in debug mode,
+ * the stage's trace and a "Prepared context" line; outside debug mode the completed stage is
+ * discarded silently so the visible view opens at the header box.
+ */
+export function createPreparingView(renderer: Renderer, debug: boolean): RunProgress {
+	let block: BlockHandle | undefined;
+	return {
+		emit(event) {
+			switch (event.type) {
+				case "stage-start":
+					block = renderer.start(event.stage);
+					return;
+				case "stage-debug":
+					if (debug) {
+						block?.debug(event.line);
+					}
+					return;
+				case "stage-failed":
+					block?.fail(`${event.stage} failed`);
+					block = undefined;
+					return;
+				case "preparing-complete":
+					if (debug) {
+						block?.succeed({ title: [{ text: "Prepared context" }] });
+					} else {
+						block?.discard();
+					}
+					block = undefined;
+					return;
 			}
 		},
 	};
@@ -529,7 +442,7 @@ function isMissing(commit: AggregatedCommit): boolean {
 /**
  * Reduce Aggregated Ticket References to the semantic Scanned-block facts.
  */
-function scannedSummary(aggregate: AggregatedTicketReferences): ScannedSummary {
+function scannedSummary(aggregate: Aggregate): ScannedSummary {
 	const unique = new Set<string>();
 	const pullRequest = new Set<string>();
 	let missing = 0;
@@ -550,7 +463,7 @@ function scannedSummary(aggregate: AggregatedTicketReferences): ScannedSummary {
 /**
  * Reduce one aggregated commit to its display row, newest commits first for the listing.
  */
-function scannedRows(aggregate: AggregatedTicketReferences): ScannedRow[] {
+function scannedRows(aggregate: Aggregate): ScannedRow[] {
 	const targets = (candidates: readonly CommitCandidate[]): TicketTarget[] =>
 		candidates.map((candidate) => candidate.target);
 
@@ -569,49 +482,38 @@ function scannedRows(aggregate: AggregatedTicketReferences): ScannedRow[] {
 }
 
 function scannedSummaryView(
-	scanned: { commits: number; aggregate: AggregatedTicketReferences } & ScannedSummary,
+	scanned: { commits: number; aggregate: Aggregate } & ScannedSummary,
+	repo: Repository,
 	options: RunViewOptions,
 ): StepSummary {
-	const title = scannedTitle(scanned.commits);
+	const title = titleLine("Scanned", scanned.commits, "commit");
 	const rows = scannedRows(scanned.aggregate);
 	if (options.commitDetail === "all") {
-		return { title, commitRows: commitRows(rows, options.repo) };
+		return { title, commitRows: commitRows(rows, repo) };
 	}
 	if (options.commitDetail === "missing") {
-		return {
-			title,
-			commitRows: commitRows(
-				rows.filter((row) => row.missing),
-				options.repo,
-			),
-		};
+		return { title, commitRows: commitRows(rows.filter((row) => row.missing), repo) };
 	}
 	return { title, notes: scannedFacts(scanned) };
 }
 
 function lookedUpView(
 	resolved: ResolvedTicketReferences,
+	repo: Repository,
 	options: RunViewOptions,
 ): StepSummary {
 	const notFound = [...resolved.candidateNotFound, ...resolved.creditNotFound];
 	// "Looked up" counts every Ticket Target that crossed the lookup seam, not just changelog
 	// entries: a credit-only pull request is looked up too, so cached + fetched reconcile against it.
-	const lookedUp = resolved.lookedUp.length;
-	const excluded = excludedSection(resolved.excluded, options);
-	if (options.showLookupOutcomes) {
-		return {
-			title: lookedUpTitle(lookedUp),
-			notes: lookupNotes(resolved.cached, resolved.fetched),
-			rows: notFoundRows(notFound, options.repo),
-			flow: lookedUpReferences(resolved.lookedUp, options.repo),
-			excluded,
-		};
-	}
+	const title = titleLine("Looked up", resolved.lookedUp.length, "ticket");
 	return {
-		title: lookedUpTitle(lookedUp),
+		title,
 		notes: lookupNotes(resolved.cached, resolved.fetched),
-		rows: notFoundRows(notFound, options.repo),
-		excluded,
+		rows: notFoundRows(notFound, repo),
+		flow: options.showLookupOutcomes
+			? lookedUpReferences(resolved.lookedUp, repo)
+			: undefined,
+		excluded: excludedSection(resolved.excluded, repo, options.showLookupOutcomes),
 	};
 }
 
@@ -621,20 +523,16 @@ function lookedUpView(
  * when the verbose outcome listing is requested. Absent when nothing was excluded.
  */
 function excludedSection(
-	excluded: readonly ExcludedTarget[],
-	options: RunViewOptions,
+	excluded: readonly TicketTarget[],
+	repo: Repository,
+	showLookupOutcomes: boolean,
 ): ExcludedSection | undefined {
 	if (excluded.length === 0) {
 		return undefined;
 	}
 	return {
-		label: [
-			countCell(excluded.length, "warning"),
-			{ text: " excluded", style: "faint" },
-		],
-		flow: options.showLookupOutcomes
-			? excludedReferences(excluded, options.repo)
-			: undefined,
+		label: factLine(excluded.length, " excluded", "warning"),
+		flow: showLookupOutcomes ? excludedReferences(excluded, repo) : undefined,
 	};
 }
 
@@ -642,11 +540,8 @@ function excludedSection(
  * A flat flow of the followReferences-excluded targets, rendered accent and linked like the looked-up
  * references: being excluded is a configuration choice, not a lookup failure.
  */
-function excludedReferences(
-	excluded: readonly ExcludedTarget[],
-	repo: Repository,
-): Cell[] {
-	return excluded.map(({ target }) => ({
+function excludedReferences(excluded: readonly TicketTarget[], repo: Repository): Cell[] {
+	return excluded.map((target) => ({
 		text: targetKey(target),
 		style: "accent",
 		link: ticketUrl(repo, target),
@@ -665,5 +560,8 @@ function generatedView(
 		creditNotFound: resolved?.creditNotFound.length ?? 0,
 		summary,
 	};
-	return { title: generatedTitle(summary.documentedEntries), rows: ledgerRows(facts) };
+	return {
+		title: titleLine("Documented", summary.documentedEntries, "entry", "entries"),
+		rows: ledgerRows(facts),
+	};
 }

@@ -34,7 +34,12 @@ export interface TargetLookupOptions {
 	readonly refresh?: boolean;
 }
 
-export interface TargetLookupResult {
+/**
+ * Role-free lookup facts over a batch of deduplicated Ticket Targets: the resolved tickets keyed by
+ * {@link targetKey}, the targets GitHub reported missing, and cache provenance. This is the single
+ * shape the lookup produces and {@link resolveTicketReferences} joins back to the {@link Aggregate}.
+ */
+export interface LookupFacts {
 	readonly facts: ReadonlyMap<string, ResolvedTicket>;
 
 	readonly notFoundTargets: readonly TicketTarget[];
@@ -67,16 +72,12 @@ export function createTargetLookup(options: TargetLookupOptions) {
 
 	return async function lookup(
 		targets: readonly TicketTarget[],
-	): Promise<TargetLookupResult> {
+	): Promise<LookupFacts> {
 		const outcomes = await Promise.all(
 			targets.map((target) =>
 				limit(async (): Promise<TargetOutcome> => {
 					const repository = target.repository ?? repo;
-					const key = repositoryKey(
-						repository.owner,
-						repository.repo,
-						target.id,
-					);
+					const key = repositoryKey(repository, target.id);
 
 					if (cache && !refresh) {
 						const hit = cache.get(key);
@@ -178,13 +179,9 @@ async function fetchTicket(
 	}
 }
 
-interface IssuePayload {
-	title: string;
-	html_url: string;
-	labels: ReadonlyArray<string | { name?: string | null }>;
-	user: { login: string } | null;
-	pull_request?: unknown;
-}
+// The GitHub issues.get response payload, taken from Octokit's own types so the parser stays honest
+// against the real response shape instead of a hand-written subset that could drift.
+type IssuePayload = Awaited<ReturnType<Octokit["rest"]["issues"]["get"]>>["data"];
 
 function toResolvedTicket(data: IssuePayload): ResolvedTicket {
 	return {

@@ -46,30 +46,31 @@ export function parseArtifactVersion(raw: string): ArtifactVersion | null {
 	if (parts.some((part) => part.length > 1 && part.startsWith("0"))) {
 		return null;
 	}
-	const release = classify(shape[2], shape[3]);
-	if (release === null) {
+	const kind = classify(shape[2], shape[3]);
+	if (kind === null) {
 		return null;
 	}
-	return { raw, components: parts.map(Number), isRelease: release };
+	return { raw, components: parts.map(Number), isRelease: kind === "release" };
 }
 
 /**
- * Classify the qualifier: `true` Release, `false` Pre-release, `null` unrecognized.
+ * Classify the qualifier as a {@code "release"}, a {@code "prerelease"}, or {@code null} when it is
+ * not a recognized qualifier spelling.
  */
 function classify(
 	separator: string | undefined,
 	qualifier: string | undefined,
-): boolean | null {
+): "release" | "prerelease" | null {
 	if (qualifier === undefined) {
-		return true;
+		return "release";
 	}
 	// A hyphen qualifier follows SemVer: always a pre-release.
 	if (separator === "-") {
-		return false;
+		return "prerelease";
 	}
 	const upper = qualifier.toUpperCase();
 	if (upper === "RELEASE" || upper === "FINAL") {
-		return true;
+		return "release";
 	}
 	if (
 		/^M\d+$/.test(upper) ||
@@ -77,7 +78,7 @@ function classify(
 		upper === "SNAPSHOT" ||
 		upper === "BUILD-SNAPSHOT"
 	) {
-		return false;
+		return "prerelease";
 	}
 	return null;
 }

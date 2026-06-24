@@ -14,9 +14,9 @@
  * limitations under the License.
  */
 
-import type { ResolvedTicket } from "./lookup.js";
+import type { LookupFacts, ResolvedTicket } from "./lookup.js";
 import {
-	type AggregatedTicketReferences,
+	type Aggregate,
 	type ReferenceCommit,
 	targetKey,
 	type TicketTarget,
@@ -47,28 +47,9 @@ export interface LookedUpTarget {
 }
 
 /**
- * A cross-repository Ticket Target that was not looked up because it falls outside the configured
- * followReferences allow-list. It produces no Changelog Entry and no Contributor Credit; the Looked
- * up block reports it separately so a limited reference is not mistaken for a not-found one.
- */
-export interface ExcludedTarget {
-	readonly target: TicketTarget;
-}
-
-/**
- * Role-free lookup facts joined back to {@link AggregatedTicketReferences}.
- */
-export interface LookupFacts {
-	readonly facts: ReadonlyMap<string, ResolvedTicket>;
-	readonly notFoundTargets: readonly TicketTarget[];
-	readonly cached: number;
-	readonly fetched: number;
-}
-
-/**
- * The immutable join of Aggregated Ticket References with GitHub lookup facts. It owns resolved
- * Changelog Entries, ordered author facts for Contributor Credit, the distinct candidate and
- * credit-only not-found failures, and cache provenance.
+ * The immutable join of an {@link Aggregate} with GitHub lookup facts. It owns resolved Changelog
+ * Entries, ordered author facts for Contributor Credit, the distinct candidate and credit-only
+ * not-found failures, and cache provenance.
  */
 export interface ResolvedTicketReferences {
 	readonly entries: readonly ChangelogEntry[];
@@ -78,7 +59,9 @@ export interface ResolvedTicketReferences {
 	// The Looked up block counts and lists these, so cached + fetched never exceeds its length.
 	readonly lookedUp: readonly LookedUpTarget[];
 
-	readonly excluded: readonly ExcludedTarget[];
+	// Cross-repository targets held back by followReferences: never looked up, never an entry or a
+	// credit, and reported separately so a limited reference is not mistaken for a not-found one.
+	readonly excluded: readonly TicketTarget[];
 	readonly candidateNotFound: readonly NotFoundTarget[];
 	readonly creditNotFound: readonly NotFoundTarget[];
 	readonly cached: number;
@@ -95,7 +78,7 @@ export interface ResolvedTicketReferences {
  * reported separately from looked-up and not-found targets.
  */
 export function resolveTicketReferences(
-	aggregate: AggregatedTicketReferences,
+	aggregate: Aggregate,
 	lookup: LookupFacts,
 	excluded: readonly TicketTarget[] = [],
 ): ResolvedTicketReferences {
@@ -103,13 +86,13 @@ export function resolveTicketReferences(
 	const authors: string[] = [];
 	const lookedUp: LookedUpTarget[] = [];
 	const excludedKeys = new Set(excluded.map(targetKey));
-	const excludedTargets: ExcludedTarget[] = [];
+	const excludedTargets: TicketTarget[] = [];
 	// Flags by target key, reused for the main join and the not-found split.
-	const flagsByKey = new Map(aggregate.targets().map((t) => [targetKey(t.target), t]));
+	const flagsByKey = new Map(aggregate.targets.map((t) => [targetKey(t.target), t]));
 
-	for (const { target, changelog, credit } of aggregate.targets()) {
+	for (const { target, changelog, credit } of aggregate.targets) {
 		if (excludedKeys.has(targetKey(target))) {
-			excludedTargets.push({ target });
+			excludedTargets.push(target);
 			continue;
 		}
 		const facts = lookup.facts.get(targetKey(target));
@@ -166,11 +149,8 @@ function earnsCredit(credit: boolean, facts: ResolvedTicket): boolean {
 	return credit || facts.pullRequest;
 }
 
-function toNotFound(
-	aggregate: AggregatedTicketReferences,
-	target: TicketTarget,
-): NotFoundTarget {
-	const commit = aggregate.provenance(target);
+function toNotFound(aggregate: Aggregate, target: TicketTarget): NotFoundTarget {
+	const commit = aggregate.provenance.get(targetKey(target));
 	// A looked-up target always originates from a scanned commit; missing provenance is a bug, not input.
 	if (!commit) {
 		throw new Error(`No commit provenance recorded for ${targetKey(target)}.`);

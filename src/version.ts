@@ -14,6 +14,8 @@
  * limitations under the License.
  */
 
+import { InvalidArgumentError } from "commander";
+
 import {
 	type ArtifactVersion,
 	compareVersions,
@@ -24,6 +26,58 @@ import {
 	predecessor,
 	sameVersion,
 } from "./artifact-version.js";
+
+/**
+ * A lone version is the release target (auto mode); the lower bound is resolved from tags and the
+ * upper bound is the matching tag or HEAD. Two arguments or a `<from>..<to>` range supply both
+ * bounds explicitly.
+ */
+export type CliRange =
+	| { readonly mode: "auto"; readonly target: string }
+	| { readonly mode: "explicit"; readonly from: string; readonly to: string };
+
+/**
+ * Interpret the positional arguments. A lone version is the release target (auto mode); two
+ * arguments or a `<from>..<to>` range supply explicit bounds. Git refnames cannot contain "..", so
+ * splitting on it is unambiguous; the range and a separate `to` are mutually exclusive.
+ */
+export function parseRange(from: string, to: string | undefined): CliRange {
+	if (!from.includes("..")) {
+		if (to !== undefined) {
+			return { mode: "explicit", from, to };
+		}
+		if (parseArtifactVersion(from) === null) {
+			throw new InvalidArgumentError(
+				`"${from}" is not a recognized version; pass <from> <to> or a <from>..<to> range`,
+			);
+		}
+		return { mode: "auto", target: from };
+	}
+	if (to !== undefined) {
+		throw new InvalidArgumentError(
+			"specify the range once: either <from>..<to> or <from> <to>, not both",
+		);
+	}
+	if (from.includes("...")) {
+		throw new InvalidArgumentError(
+			`invalid range "${from}": use two dots, e.g. 4.0.0..4.0.4`,
+		);
+	}
+	if (from.indexOf("..") !== from.lastIndexOf("..")) {
+		throw new InvalidArgumentError(
+			`invalid range "${from}": use a single <from>..<to>`,
+		);
+	}
+	const separator = from.indexOf("..");
+	const lower = from.slice(0, separator);
+	const upper = from.slice(separator + 2);
+	if (lower === "") {
+		throw new InvalidArgumentError(
+			`invalid range "${from}": missing <from> before ".."`,
+		);
+	}
+	return { mode: "explicit", from: lower, to: upper === "" ? "HEAD" : upper };
+}
 
 /**
  * Supplies the repository's refs to {@link resolveAutoRange}, isolating it from Git.
@@ -154,11 +208,15 @@ function previousLineOpener(
 	target: ArtifactVersion,
 	releases: readonly ArtifactVersion[],
 ): LowerBound {
-	const highest = releases
-		.filter((version) => compareVersions(version, target) < 0)
-		.reduce<
-			ArtifactVersion | undefined
-		>((best, version) => (best === undefined || compareVersions(version, best) > 0 ? version : best), undefined);
+	let highest: ArtifactVersion | undefined;
+	for (const version of releases) {
+		if (compareVersions(version, target) >= 0) {
+			continue;
+		}
+		if (highest === undefined || compareVersions(version, highest) > 0) {
+			highest = version;
+		}
+	}
 	if (highest === undefined) {
 		return {};
 	}

@@ -218,9 +218,9 @@ function nonEmptyLines(stdout: string): string[] {
  * repository, output too large to buffer) into actionable errors. Other failures, including
  * rev-parse's exit code 1, pass through unchanged for callers to interpret.
  */
-async function runGit(
+export async function runGit(
 	args: string[],
-	cwd: string,
+	cwd: string | undefined,
 	options: { maxBuffer?: number; trace?: Trace } = {},
 ): Promise<string> {
 	options.trace?.(`git ${args.join(" ")}`);
@@ -235,7 +235,11 @@ async function runGit(
 	}
 }
 
-function translateGitError(error: unknown, args: string[], cwd: string): unknown {
+function translateGitError(
+	error: unknown,
+	args: string[],
+	cwd: string | undefined,
+): unknown {
 	if (hasCode(error, "ENOENT")) {
 		return new Error(GIT_NOT_FOUND, { cause: error });
 	}

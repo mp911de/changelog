@@ -188,7 +188,7 @@ describe("runPipeline", () => {
 		);
 		const resolved =
 			event?.type === "looking-up-complete" ? event.resolved : undefined;
-		expect(resolved?.excluded.map((t) => targetKey(t.target))).toEqual([
+		expect(resolved?.excluded.map((target) => targetKey(target))).toEqual([
 			"forbidden/repo#9",
 		]);
 		expect(resolved?.candidateNotFound).toEqual([]);
@@ -251,7 +251,9 @@ describe("runPipeline", () => {
 		expect(scanning).toMatchObject({ commits: 3 });
 		expect(
 			scanning?.type === "scanning-complete" &&
-				scanning.aggregate.changelogTargets().map((target) => target.id),
+				scanning.aggregate.targets
+					.filter((flagged) => flagged.changelog)
+					.map((flagged) => flagged.target.id),
 		).toEqual(["#101", "#102", "#404"]);
 
 		const lookedUp = progress.events.find(

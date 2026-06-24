@@ -15,7 +15,7 @@
  */
 
 import type { ResolvedTicketReferences } from "./resolved-references.js";
-import type { AggregatedTicketReferences } from "./ticket-references.js";
+import type { Aggregate } from "./ticket-references.js";
 
 /**
  * The visible lifecycle stages of one run, in order. Preparing resolves the range, repository, and
@@ -53,7 +53,7 @@ export type RunProgressEvent =
 			readonly type: "scanning-complete";
 			readonly stage: "Scanning";
 			readonly commits: number;
-			readonly aggregate: AggregatedTicketReferences;
+			readonly aggregate: Aggregate;
 	  }
 	| {
 			readonly type: "looking-up-complete";

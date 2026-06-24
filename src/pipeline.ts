@@ -19,10 +19,11 @@ import { type ChangelogConfig, followReferenceMatcher } from "./config.js";
 import { parseReferenceOccurrences } from "./commit-parser.js";
 import { scanCommits } from "./git.js";
 import type { Repository } from "./github-context.js";
+import type { LookupFacts } from "./lookup.js";
 import { noRunProgress, type RunProgress, runStage } from "./progress.js";
-import { type LookupFacts, resolveTicketReferences } from "./resolved-references.js";
+import { resolveTicketReferences } from "./resolved-references.js";
 import {
-	collectTicketReferences,
+	aggregateReferences,
 	type CommitReferences,
 	type LookupTarget,
 	type TicketTarget,
@@ -78,10 +79,7 @@ export async function runPipeline(options: PipelineOptions): Promise<string> {
 			}));
 			return {
 				commitCount: commits.length,
-				aggregate: collectTicketReferences(
-					collected,
-					options.repository,
-				).aggregate(),
+				aggregate: aggregateReferences(collected, options.repository),
 			};
 		},
 		(result) => ({
@@ -97,7 +95,7 @@ export async function runPipeline(options: PipelineOptions): Promise<string> {
 		"Looking up",
 		async (debug) => {
 			const { followed, excluded } = partitionByFollow(
-				aggregate.targets(),
+				aggregate.targets,
 				options.config.followReferences,
 			);
 			const facts = await options.lookup(followed, debug);

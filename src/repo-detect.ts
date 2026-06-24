@@ -14,17 +14,14 @@
  * limitations under the License.
  */
 
-import { execFile } from "node:child_process";
 import { readFile } from "node:fs/promises";
 import { homedir } from "node:os";
 import { join } from "node:path";
-import { promisify } from "node:util";
 
 import { load } from "js-yaml";
 
+import { runGit } from "./git.js";
 import type { Repository } from "./github-context.js";
-
-const execFileAsync = promisify(execFile);
 
 export interface RemoteRepository {
 	readonly host: string;
@@ -181,11 +178,11 @@ async function gitRemoteUrl(
 	cwd: string | undefined,
 	trace?: (line: string) => void,
 ): Promise<string | undefined> {
+	// Reuse git.ts's runGit (shared trace wrapping and error translation), reducing any failure —
+	// missing git, no such remote, not a repository — to "no remote URL" so detection falls back to gh.
 	const run = async (args: string[]): Promise<string | undefined> => {
-		trace?.(`git ${args.join(" ")}`);
 		try {
-			const { stdout } = await execFileAsync("git", args, cwd ? { cwd } : {});
-			return stdout.trim();
+			return (await runGit(args, cwd, { trace })).trim();
 		} catch {
 			return undefined;
 		}

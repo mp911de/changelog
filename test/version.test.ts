@@ -40,17 +40,8 @@ describe("resolveAutoRange", () => {
 		});
 	});
 
-	it("resolves a line-opener to the previous line's opener and HEAD", async () => {
+	it("resolves a minor line-opener to the previous line's opener and HEAD", async () => {
 		const refs = repo({ tags: async () => ["4.0.0", "4.0.5", "4.0.6"] });
-
-		expect(await resolveAutoRange("4.1.0", refs)).toEqual({
-			from: "4.0.0",
-			to: "HEAD",
-		});
-	});
-
-	it("resolves a minor bump to the previous minor opener and HEAD", async () => {
-		const refs = repo({ tags: async () => ["4.0.0", "4.0.1"] });
 
 		expect(await resolveAutoRange("4.1.0", refs)).toEqual({
 			from: "4.0.0",
