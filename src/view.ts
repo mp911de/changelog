@@ -492,7 +492,13 @@ function scannedSummaryView(
 		return { title, commitRows: commitRows(rows, repo) };
 	}
 	if (options.commitDetail === "missing") {
-		return { title, commitRows: commitRows(rows.filter((row) => row.missing), repo) };
+		return {
+			title,
+			commitRows: commitRows(
+				rows.filter((row) => row.missing),
+				repo,
+			),
+		};
 	}
 	return { title, notes: scannedFacts(scanned) };
 }

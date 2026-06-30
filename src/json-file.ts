@@ -64,10 +64,7 @@ export async function readOptionalJson<T>(
  * Write atomically via a sibling temp file and rename so an interrupted write cannot truncate
  * the target into invalid JSON. Pretty printing and a trailing newline keep diffs readable.
  */
-export async function writeJsonFile(
-	path: string,
-	value: unknown,
-): Promise<void> {
+export async function writeJsonFile(path: string, value: unknown): Promise<void> {
 	await mkdir(dirname(path), { recursive: true });
 	const text = JSON.stringify(value, null, 2);
 	await writeFileAtomically(path, `${text}\n`);

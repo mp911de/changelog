@@ -70,9 +70,7 @@ export function createTargetLookup(options: TargetLookupOptions) {
 	const { octokit, repo, cache, refresh } = options;
 	const limit = pLimit(CONCURRENCY);
 
-	return async function lookup(
-		targets: readonly TicketTarget[],
-	): Promise<LookupFacts> {
+	return async function lookup(targets: readonly TicketTarget[]): Promise<LookupFacts> {
 		const outcomes = await Promise.all(
 			targets.map((target) =>
 				limit(async (): Promise<TargetOutcome> => {
