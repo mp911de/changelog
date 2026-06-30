@@ -303,16 +303,16 @@ export function releaseVersion(
 function compareComponents(left: readonly number[], right: readonly number[]): number {
 	const length = Math.max(left.length, right.length);
 	for (let index = 0; index < length; index++) {
-		const difference = (left[index] ?? 0) - (right[index] ?? 0);
-		if (difference !== 0) {
-			return difference < 0 ? -1 : 1;
+		const comparison = compare(left[index] ?? 0, right[index] ?? 0);
+		if (comparison !== 0) {
+			return comparison;
 		}
 	}
 	return 0;
 }
 
 function compareQualifiers(left: VersionQualifier, right: VersionQualifier): number {
-	const orderComparison = compareNumber(left.order, right.order);
+	const orderComparison = compare(left.order, right.order);
 	if (orderComparison !== 0) {
 		return orderComparison;
 	}
@@ -336,41 +336,28 @@ function compareIdentifiers(
 			return comparison;
 		}
 	}
-	return compareNumber(left.length, right.length);
+	return compare(left.length, right.length);
 }
 
 function compareIdentifier(left: Identifier, right: Identifier): number {
 	if (left.numeric !== undefined && right.numeric !== undefined) {
-		return compareBigint(left.numeric, right.numeric);
+		return compare(left.numeric, right.numeric);
 	}
 	if (left.numeric !== undefined || right.numeric !== undefined) {
 		return left.numeric !== undefined ? -1 : 1;
 	}
-	return compareText(left.raw, right.raw);
+	return compare(left.raw, right.raw);
 }
 
 function compareGenericText(left: string, right: string): number {
-	const leftLower = left.toLowerCase();
-	const rightLower = right.toLowerCase();
-	const lowerComparison = compareText(leftLower, rightLower);
-	return lowerComparison !== 0 ? lowerComparison : compareText(left, right);
+	const lowerComparison = compare(left.toLowerCase(), right.toLowerCase());
+	return lowerComparison !== 0 ? lowerComparison : compare(left, right);
 }
 
-function compareText(left: string, right: string): number {
-	if (left === right) {
-		return 0;
-	}
-	return left < right ? -1 : 1;
-}
-
-function compareNumber(left: number, right: number): number {
-	if (left === right) {
-		return 0;
-	}
-	return left < right ? -1 : 1;
-}
-
-function compareBigint(left: bigint, right: bigint): number {
+/**
+ * Three-way comparison for any relationally-ordered primitive, yielding -1, 0, or 1.
+ */
+function compare<T extends string | number | bigint>(left: T, right: T): number {
 	if (left === right) {
 		return 0;
 	}

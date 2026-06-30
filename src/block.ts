@@ -34,14 +34,11 @@ export interface ExcludedSection {
 export interface StepSummary {
 	readonly title: readonly Cell[];
 
-	// Simple inline child lines (no column alignment), rendered above the aligned detail rows.
 	readonly notes?: readonly (readonly Cell[])[];
 	readonly rows?: readonly Row[];
 
-	// Scanned-commit rows laid out as a trailing atomic reference flow fitted to the terminal width.
 	readonly commitRows?: readonly CommitRow[];
 
-	// A flat, comma-separated flow of atomic items wrapped to the terminal width (lookup outcomes).
 	readonly flow?: readonly Cell[];
 
 	readonly excluded?: ExcludedSection;
@@ -66,7 +63,6 @@ export interface BlockReporter {
 export interface HeaderFields {
 	readonly repoName: string;
 
-	// GitHub home page of the repository; links the repo name in the title (color mode only).
 	readonly repoUrl?: string;
 	readonly version: string;
 	readonly repository: readonly Cell[];
@@ -74,16 +70,9 @@ export interface HeaderFields {
 	readonly output: readonly Cell[];
 }
 
-export interface BlockContent {
-	readonly title: readonly Cell[];
+export interface BlockContent extends StepSummary {
 	readonly debugLines?: readonly string[];
-	readonly notes?: readonly (readonly Cell[])[];
-	readonly rows?: readonly Row[];
-	readonly commitRows?: readonly CommitRow[];
-	readonly flow?: readonly Cell[];
-	readonly excluded?: ExcludedSection;
 
-	// Visible column budget for the trailing reference flow; Infinity leaves it unbounded.
 	readonly budget?: number;
 	readonly duration?: string;
 }

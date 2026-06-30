@@ -59,18 +59,11 @@ export interface CommitRow {
 // Summary free-text minimum: additional references are dropped, and the lead wraps to a
 // continuation line, before the summary shrinks below this width.
 const SUMMARY_MIN = 10;
-// A single space separates references in the trailing flow.
 const FLOW_SEP = " ";
-// Two spaces separate the fixed sha and author columns from each other and from the summary, so
-// authors line up across rows.
 const CORE_GAP = "  ";
 const CORE_GAP_W = 2;
-// A wrapped Lead Ticket Reference continues on the next child line, indented under the row.
 const CONTINUATION_INDENT = "  ";
 
-/**
- * Map a reference emphasis level to its descending-color {@link Style}.
- */
 function emphasisStyle(emphasis: Emphasis): Style {
 	switch (emphasis) {
 		case "lead":
@@ -86,16 +79,10 @@ function emphasisStyle(emphasis: Emphasis): Style {
 	}
 }
 
-/**
- * The faint-gray omission marker shown when additional references do not all fit.
- */
 function omissionMarker(count: number): string {
 	return `and ${count} more`;
 }
 
-/**
- * Realize one atomic reference item with its emphasis color and link.
- */
 function realizeReference(palette: Palette, item: ReferenceItem): string {
 	return realize(palette, item.text, {
 		text: item.text,
@@ -168,7 +155,6 @@ function layoutCommitRow(
 	const sha = realize(palette, row.sha.text, row.sha);
 	const shaW = palette.width(row.sha.text);
 	const summaryW = palette.width(row.summary);
-	// The fixed left columns: sha, gap, author (padded to the shared column width), gap.
 	const coreFixed = shaW + CORE_GAP_W + authorWidth + CORE_GAP_W;
 
 	const core = (summary: string): string => {
@@ -185,8 +171,6 @@ function layoutCommitRow(
 		);
 	};
 
-	// No lead: the summary fills the remaining core-line room and the references trail it directly,
-	// opening with the two-space column gap.
 	if (!row.lead) {
 		const room = Math.max(SUMMARY_MIN, budget - coreFixed);
 		const summary = truncateText(palette, row.summary, Math.min(summaryW, room));
@@ -201,12 +185,10 @@ function layoutCommitRow(
 	}
 
 	const leadW = palette.width(row.lead.text);
-	// The reference region opens with the two-space column gap before the lead.
 	const leadCost = CORE_GAP_W + leadW;
 	const lead = realizeReference(palette, row.lead);
 	const roomWithLead = budget - coreFixed - leadCost;
 
-	// Keep the lead on the core line, truncating the summary toward its minimum to make room.
 	if (roomWithLead >= Math.min(summaryW, SUMMARY_MIN)) {
 		const summary = truncateText(
 			palette,
@@ -235,7 +217,6 @@ export function layoutCommitRows(
 	if (rows.length === 0) {
 		return [];
 	}
-	// The author is a fixed left-aligned column sized to the widest author so names line up.
 	const authorWidth = Math.max(0, ...rows.map((row) => palette.width(row.author)));
 	return rows.flatMap((row) => layoutCommitRow(palette, row, budget, authorWidth));
 }

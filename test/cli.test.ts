@@ -92,7 +92,7 @@ function mockGitHubAdapter(
 		createLookup: () => async (targets) => {
 			const facts = new Map<string, ResolvedTicket>();
 			const notFoundTargets = [];
-			for (const { target } of targets) {
+			for (const target of targets) {
 				const key = targetKey(target);
 				const ticket = tickets[key] ?? tickets[target.id];
 				if (ticket) {
@@ -177,7 +177,7 @@ describe("main argument parsing", () => {
 			runtime,
 		);
 		expect(code).toBe(2);
-		expect(err.join("")).toMatch(/--quiet and --debug cannot be combined/);
+		expect(err.join("")).toMatch(/--debug.+cannot be used with option.+quiet/);
 	});
 
 	it("returns 2 for --resolve-previous with an explicit range", async () => {
@@ -292,6 +292,40 @@ describe("main run-level", () => {
 		expect(code).toBe(0);
 		expect(out.join("")).toContain("Add feature");
 		expect(err.join("")).toBe("");
+	});
+
+	it("uses a valid -C directory as the run cwd", async () => {
+		repo.commit("base");
+		repo.git("tag", "1.0.0");
+		repo.commit("Fixes #1 Add feature");
+		repo.git("tag", "1.1.0");
+		const outside = mkdtempSync(join(tmpdir(), "changelog-cwd-"));
+
+		try {
+			const adapter = mockGitHubAdapter({
+				"#1": resolvedTicket("Add feature", ["enhancement"]),
+			});
+			const { out, err, runtime } = captureRuntime(outside, adapter);
+			const code = await main(
+				[
+					"node",
+					"changelog",
+					"-C",
+					repo.dir,
+					"--output",
+					"-",
+					"--quiet",
+					"1.1.0",
+				],
+				runtime,
+			);
+
+			expect(code).toBe(0);
+			expect(out.join("")).toContain("Add feature");
+			expect(err.join("")).toBe("");
+		} finally {
+			rmSync(outside, { recursive: true, force: true });
+		}
 	});
 
 	it("writes the changelog to a file and returns 0", async () => {
@@ -466,7 +500,7 @@ describe("main run-level", () => {
 			login: "tester",
 			createLookup: () => async (targets) => {
 				const facts = new Map<string, ResolvedTicket>();
-				for (const { target } of targets) {
+				for (const target of targets) {
 					requested.push(target.id);
 					if (target.id === "#1234") {
 						facts.set(
@@ -502,7 +536,7 @@ describe("main run-level", () => {
 			repo: { owner: "testowner", repo: "testrepo" },
 			login: "tester",
 			createLookup: () => async (targets) => {
-				requested.push(...targets.map(({ target }) => targetKey(target)));
+				requested.push(...targets.map(targetKey));
 				return {
 					facts: new Map([
 						["#12", resolvedTicket("One target", ["enhancement"])],

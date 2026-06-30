@@ -31,8 +31,8 @@ function commit(sha: string, summary = `${sha} summary`): ReferenceCommit {
 }
 
 // The display label the view renders for a role entry: the canonical target key.
-function label(entry: { target: TicketTarget } | undefined): string | undefined {
-	return entry && targetKey(entry.target);
+function label(target: TicketTarget | undefined): string | undefined {
+	return target && targetKey(target);
 }
 
 function aggregateOf(

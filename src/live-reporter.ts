@@ -149,13 +149,8 @@ export function liveReporter(
 							: undefined;
 					finish(
 						blockLines(palette, SUCCESS, {
-							title: summary.title,
+							...summary,
 							debugLines: debug,
-							notes: summary.notes,
-							rows: summary.rows,
-							commitRows: summary.commitRows,
-							flow: summary.flow,
-							excluded: summary.excluded,
 							budget: budget(),
 							duration,
 						}),

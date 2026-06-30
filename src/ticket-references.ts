@@ -23,9 +23,6 @@ export type ReferenceQualifier =
 	| "Simple"
 	| "Related";
 
-/**
- * One Ticket Reference occurrence.
- */
 export interface ReferenceOccurrence {
 	readonly id: string;
 	readonly qualifier: ReferenceQualifier;
@@ -87,38 +84,24 @@ export function targetKey(target: TicketTarget): string {
 	return target.repository ? repositoryKey(target.repository, target.id) : target.id;
 }
 
-/**
- * One commit's parser output: its originating commit plus its ordered occurrences.
- */
 export interface CommitReferences {
 	readonly commit: ReferenceCommit;
 	readonly occurrences: readonly ReferenceOccurrence[];
 }
 
-/**
- * A Changelog Candidate as displayed for one commit, reduced to its Ticket Target. The display label
- * is derived from the target at render time via {@link targetKey}.
- */
-export interface CommitCandidate {
-	readonly target: TicketTarget;
-}
-
-/**
- * One commit's aggregated display roles.
- */
 export interface AggregatedCommit {
 	readonly commit: ReferenceCommit;
-	readonly lead: CommitCandidate | undefined;
-	readonly candidates: readonly CommitCandidate[];
-	readonly credits: readonly CommitCandidate[];
-	readonly demoted: readonly CommitCandidate[];
-	readonly related: readonly CommitCandidate[];
+	readonly lead: TicketTarget | undefined;
+	readonly candidates: readonly TicketTarget[];
+	readonly credits: readonly TicketTarget[];
+	readonly demoted: readonly TicketTarget[];
+	readonly related: readonly TicketTarget[];
 }
 
 /**
- * A deduplicated Ticket Target that crosses the GitHub lookup seam, flagged with what it is needed
- * for: a Changelog Entry ({@code changelog}), Contributor Credit ({@code credit}), or both. Demoted
- * and Related references are needed for neither and never reach lookup.
+ * A deduplicated Ticket Target, flagged with what it is needed for: a Changelog Entry
+ * ({@code changelog}), Contributor Credit ({@code credit}), or both. Demoted and Related references
+ * are needed for neither and never reach lookup.
  */
 export interface LookupTarget {
 	readonly target: TicketTarget;
@@ -129,15 +112,14 @@ export interface LookupTarget {
 /**
  * The immutable, aggregated result of Ticket References, as plain data. It owns Simple Changelog
  * Candidate selection, per-commit display order, run-wide Ticket Target deduplication, the flagged
- * lookup targets, and oldest-occurrence provenance.
+ * targets, and oldest-occurrence provenance.
  */
 export interface Aggregate {
 	readonly commits: readonly AggregatedCommit[];
 
 	/**
-	 * Every deduplicated Ticket Target that crosses the lookup seam, each flagged for changelog
-	 * and/or credit, in commit-discovery (first-appearance) order. Demoted and Related references
-	 * are excluded.
+	 * Every deduplicated Ticket Target needed for changelog and/or credit, in commit-discovery
+	 * (first-appearance) order. Demoted and Related references are excluded.
 	 */
 	readonly targets: readonly LookupTarget[];
 
@@ -178,7 +160,6 @@ export function aggregateReferences(
 		// Candidate and demotes the rest. Related references stay outside candidate selection.
 		const tier = highestCandidateTier(occurrences);
 
-		// Deduplicate each role per commit so a repeated target displays once, in textual order.
 		const candidates = dedupeByKey();
 		const credits = dedupeByKey();
 		const demoted = dedupeByKey();
@@ -202,10 +183,8 @@ export function aggregateReferences(
 				continue;
 			}
 			if (occurrence.qualifier === "PullRequest") {
-				// Already recorded as a Credit Reference above; it is not a candidate here.
 				continue;
 			}
-			// A candidate-eligible reference from a weaker tier: demoted, never looked up.
 			demoted.add(target);
 		}
 		return {
@@ -241,13 +220,9 @@ function buildLookupTargets(
 	}));
 }
 
-/**
- * Collect {@link CommitCandidate}s for one commit role, deduplicating by Ticket Target key while
- * preserving the textual order of first sighting.
- */
 function dedupeByKey() {
 	const seen = new Set<string>();
-	const items: CommitCandidate[] = [];
+	const items: TicketTarget[] = [];
 	return {
 		items,
 		add(target: TicketTarget): void {
@@ -256,7 +231,7 @@ function dedupeByKey() {
 				return;
 			}
 			seen.add(key);
-			items.push({ target });
+			items.push(target);
 		},
 	};
 }
@@ -273,15 +248,10 @@ const QUALIFIERS = {
 	Simple: { rank: 0, candidate: true },
 } satisfies Record<ReferenceQualifier, { rank: number; candidate: boolean }>;
 
-/**
- * Strength rank for a Reference Qualifier (higher is stronger): the parser's overlap resolution and
- * candidate-tier selection share this one ordering.
- */
 export function qualifierRank(qualifier: ReferenceQualifier): number {
 	return QUALIFIERS[qualifier].rank;
 }
 
-// Candidate quality tiers, strongest first, derived from the shared table.
 const CANDIDATE_TIERS: readonly ReferenceQualifier[] = (
 	Object.keys(QUALIFIERS) as ReferenceQualifier[]
 )

@@ -27,6 +27,7 @@ import {
 	releaseVersion,
 	sameVersion,
 } from "./artifact-version.js";
+import type { RefKind } from "./git.js";
 
 /**
  * A lone version is the release target (auto mode); the lower bound is resolved from tags and the
@@ -81,6 +82,17 @@ export function parseRange(from: string, to: string | undefined): CliRange {
 }
 
 /**
+ * A Maintenance Branch resolved against the repository: an unambiguous {@link ref} to feed `git log`
+ * and `git rev-parse`, plus the human {@link label} to show in the header. The two differ for a
+ * local branch (`refs/heads/4.0.x` vs `4.0.x`) so a same-named tag cannot shadow the branch in a
+ * bare `git log 4.0.4..4.0.x`.
+ */
+export interface ResolvedBranch {
+	readonly ref: string;
+	readonly label: string;
+}
+
+/**
  * Supplies the repository's refs to {@link resolveAutoRange}, isolating it from Git.
  */
 export interface RepoRefs {
@@ -90,14 +102,30 @@ export interface RepoRefs {
 	tags(): Promise<readonly string[]>;
 
 	/**
-	 * Resolve a maintenance-branch name to a usable revision (local or remote-tracking), or undefined.
+	 * Resolve a Maintenance Branch name to a usable revision (local or remote-tracking), or undefined.
 	 */
-	resolveBranch(name: string): Promise<string | undefined>;
+	resolveBranch(name: string): Promise<ResolvedBranch | undefined>;
+}
+
+/**
+ * One end of a resolved commit range. {@link ref} is the unambiguous revision passed to Git;
+ * {@link label} is its display spelling; {@link kind} is its git-resolved {@link RefKind} when the
+ * resolver already knows it (always in auto mode), and {@code undefined} for an explicit bound whose
+ * kind the caller classifies only when a header will render it.
+ */
+export interface ResolvedBound {
+	readonly ref: string;
+	readonly label: string;
+	readonly kind?: RefKind;
 }
 
 export interface ResolvedRange {
-	readonly from: string;
-	readonly to: string;
+	readonly from: ResolvedBound;
+	readonly to: ResolvedBound;
+}
+
+function tagBound(raw: string): ResolvedBound {
+	return { ref: raw, label: raw, kind: "tag" };
 }
 
 /**
@@ -127,17 +155,17 @@ async function resolveUpperBound(
 	target: ArtifactVersion,
 	tags: ArtifactVersion[],
 	repo: RepoRefs,
-): Promise<string> {
+): Promise<ResolvedBound> {
 	// A tag for this exact version means it is already released: regenerate against that tag.
 	const tagged =
 		tags.find((version) => version.raw === target.raw) ??
 		tags.find((version) => sameVersion(version, target));
 	if (tagged !== undefined) {
-		return tagged.raw;
+		return tagBound(tagged.raw);
 	}
 	// A line-opener is developed on the current checkout; a patch comes off its maintenance branch.
 	if (isLineOpener(target)) {
-		return "HEAD";
+		return { ref: "HEAD", label: "HEAD", kind: "head" };
 	}
 	const branch = maintenanceBranch(target);
 	const resolved = await repo.resolveBranch(branch);
@@ -146,7 +174,7 @@ async function resolveUpperBound(
 			`no ${branch} branch found for ${target.raw}; check out the maintenance branch or pass <from> <to>`,
 		);
 	}
-	return resolved;
+	return { ref: resolved.ref, label: resolved.label, kind: "branch" };
 }
 
 interface LowerBound {
@@ -156,7 +184,10 @@ interface LowerBound {
 	readonly expected?: string;
 }
 
-function resolveLowerBound(target: ArtifactVersion, tags: ArtifactVersion[]): string {
+function resolveLowerBound(
+	target: ArtifactVersion,
+	tags: ArtifactVersion[],
+): ResolvedBound {
 	const releases = tags.filter((version) => version.isRelease);
 
 	// Patches and minors resolve to their exact arithmetic Predecessor, which must be tagged: 4.0.4
@@ -167,7 +198,7 @@ function resolveLowerBound(target: ArtifactVersion, tags: ArtifactVersion[]): st
 		? previousLineOpener(target, releases)
 		: exactPredecessor(target, releases);
 	if (lower.tag !== undefined) {
-		return lower.tag;
+		return tagBound(lower.tag);
 	}
 
 	// No matching tag: distinguish a Gap (releases order below) from a first release (none do).
@@ -181,9 +212,6 @@ function resolveLowerBound(target: ArtifactVersion, tags: ArtifactVersion[]): st
 	);
 }
 
-/**
- * The Predecessor of a patch: its last component decremented, which must exist as a release tag.
- */
 function exactPredecessor(
 	target: ArtifactVersion,
 	releases: readonly ArtifactVersion[],

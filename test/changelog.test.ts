@@ -238,7 +238,7 @@ describe("generateChangelog entries", () => {
 	});
 
 	it("counts placed items per summary bucket under the default config (features, bugs)", () => {
-		const { sectionCounts } = generateChangelog(
+		const { summary } = generateChangelog(
 			[
 				entry("#1", "Feature A", ["enhancement"]),
 				entry("#2", "Feature B", ["enhancement"]),
@@ -250,13 +250,13 @@ describe("generateChangelog entries", () => {
 			{ all: false },
 		);
 
-		expect(sectionCounts.get("features")).toBe(2);
-		expect(sectionCounts.get("bugs")).toBe(1);
-		expect(sectionCounts.has("documentation")).toBe(false);
+		expect(summary.sectionCounts.get("features")).toBe(2);
+		expect(summary.sectionCounts.get("bugs")).toBe(1);
+		expect(summary.sectionCounts.has("documentation")).toBe(false);
 	});
 
 	it("counts only rendered entries, excluding dropped and unclassified-without-all items", () => {
-		const { documentedEntries } = generateChangelog(
+		const { summary } = generateChangelog(
 			[
 				entry("#1", "Feature A", ["enhancement"]),
 				entry("#2", "Bug A", ["bug"]),
@@ -268,11 +268,11 @@ describe("generateChangelog entries", () => {
 			{ all: false },
 		);
 
-		expect(documentedEntries).toBe(2);
+		expect(summary.documentedEntries).toBe(2);
 	});
 
 	it("counts an included unclassified entry as documented under --all", () => {
-		const { documentedEntries } = generateChangelog(
+		const { summary } = generateChangelog(
 			[
 				entry("#1", "Feature A", ["enhancement"]),
 				entry("#2", "Mystery", ["unmatched"]),
@@ -283,7 +283,7 @@ describe("generateChangelog entries", () => {
 			{ all: true },
 		);
 
-		expect(documentedEntries).toBe(2);
+		expect(summary.documentedEntries).toBe(2);
 	});
 
 	it("derives bucket identity from the summary key, not the title (config-driven counts)", () => {
@@ -299,7 +299,7 @@ describe("generateChangelog entries", () => {
 			team: [],
 		};
 
-		const { sectionCounts } = generateChangelog(
+		const { summary } = generateChangelog(
 			[
 				entry("#1", "Feature A", ["enhancement"]),
 				entry("#2", "Feature B", ["enhancement"]),
@@ -309,8 +309,8 @@ describe("generateChangelog entries", () => {
 			{ all: false },
 		);
 
-		expect([...sectionCounts.entries()]).toEqual([["improvements", 2]]);
-		expect(sectionCounts.has("features")).toBe(false);
+		expect([...summary.sectionCounts.entries()]).toEqual([["improvements", 2]]);
+		expect(summary.sectionCounts.has("features")).toBe(false);
 	});
 });
 
@@ -327,14 +327,11 @@ describe("generateChangelog contributor credit", () => {
 	});
 
 	it("never renders a Contributor Credit without a Changelog Entry from the same target", () => {
-		const { markdown, documentedEntries } = generateChangelog(
-			[],
-			["contrib"],
-			defaultConfig,
-			{ all: false },
-		);
+		const { markdown, summary } = generateChangelog([], ["contrib"], defaultConfig, {
+			all: false,
+		});
 
-		expect(documentedEntries).toBe(0);
+		expect(summary.documentedEntries).toBe(0);
 		expect(markdown).toBe("## :heart: Contributors\n- @contrib\n");
 	});
 
@@ -374,18 +371,18 @@ describe("generateChangelog contributor credit", () => {
 	});
 
 	it("counts unique contributors after team exclusion", () => {
-		const { contributorCount } = generateChangelog(
+		const { summary } = generateChangelog(
 			[entry("#1", "Work", ["enhancement"])],
 			["octocat", "alice", "Alice"],
 			defaultConfig,
 			{ all: false },
 		);
 
-		expect(contributorCount).toBe(1);
+		expect(summary.contributorCount).toBe(1);
 	});
 
 	it("omits the Contributors section when no eligible contributors remain", () => {
-		const { markdown, contributorCount } = generateChangelog(
+		const { markdown, summary } = generateChangelog(
 			[entry("#1", "Work", ["enhancement"])],
 			["octocat"],
 			defaultConfig,
@@ -393,7 +390,7 @@ describe("generateChangelog contributor credit", () => {
 		);
 
 		expect(markdown).not.toContain(":heart: Contributors");
-		expect(contributorCount).toBe(0);
+		expect(summary.contributorCount).toBe(0);
 	});
 
 	it("appends the Contributors block after the categorized sections", () => {

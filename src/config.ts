@@ -35,11 +35,6 @@ export interface ChangelogConfig {
 	readonly followReferences?: readonly string[];
 }
 
-/**
- * Default configuration for a new changelog.json file.
- * @param login GitHub login of the current user.
- * @param owner the current repository owner, seeded into a new config's followReferences.
- */
 function defaultConfig(login: string, owner?: string): ChangelogConfig {
 	const base: ChangelogConfig = {
 		sections: [
@@ -73,8 +68,6 @@ function defaultConfig(login: string, owner?: string): ChangelogConfig {
 export interface LoadOrCreateConfigOptions {
 	readonly baseDir: string;
 	readonly login: string;
-	// The current repository owner, seeded into a new config's followReferences as `<owner>/*`. When
-	// absent, a new config omits followReferences and is therefore unrestricted.
 	readonly owner?: string;
 }
 

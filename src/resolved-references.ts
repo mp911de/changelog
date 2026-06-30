@@ -22,10 +22,6 @@ import {
 	type TicketTarget,
 } from "./ticket-references.js";
 
-/**
- * One resolved Changelog Entry: a deduplicated candidate Ticket Target joined with its GitHub
- * facts. Document generation places it into a section by its labels and renders its title and link.
- */
 export interface ChangelogEntry {
 	readonly target: TicketTarget;
 	readonly title: string;
@@ -33,9 +29,6 @@ export interface ChangelogEntry {
 	readonly labels: readonly string[];
 }
 
-/**
- * A Ticket Target that could not be resolved, with the oldest commit that referenced it.
- */
 export interface NotFoundTarget {
 	readonly target: TicketTarget;
 	readonly commit: ReferenceCommit;
@@ -87,7 +80,6 @@ export function resolveTicketReferences(
 	const lookedUp: LookedUpTarget[] = [];
 	const excludedKeys = new Set(excluded.map(targetKey));
 	const excludedTargets: TicketTarget[] = [];
-	// Flags by target key, reused for the main join and the not-found split.
 	const flagsByKey = new Map(aggregate.targets.map((t) => [targetKey(t.target), t]));
 
 	for (const { target, changelog, credit } of aggregate.targets) {
@@ -96,7 +88,6 @@ export function resolveTicketReferences(
 			continue;
 		}
 		const facts = lookup.facts.get(targetKey(target));
-		// Every target flagged for lookup crossed the seam, whether or not GitHub resolved it.
 		lookedUp.push({ target, found: facts !== undefined });
 		if (!facts) {
 			continue;

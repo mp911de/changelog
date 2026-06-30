@@ -14,6 +14,7 @@
  * limitations under the License.
  */
 
+import type { ChangelogSummary } from "./changelog.js";
 import type { ResolvedTicketReferences } from "./resolved-references.js";
 import type { Aggregate } from "./ticket-references.js";
 
@@ -24,18 +25,6 @@ import type { Aggregate } from "./ticket-references.js";
  * There is no separate Parsing stage: parsing and aggregation belong to Scanning.
  */
 export type RunStage = "Preparing" | "Scanning" | "Looking up" | "Generating";
-
-/**
- * The transient document summary produced by generation: the count of entries actually rendered
- * (after exclusion and `--all`), the per-section counts in configured order, and the number of
- * Contributor Credits. It is reported as Run Progress and is not part of the Changelog Document.
- */
-export interface GenerationSummary {
-	readonly documentedEntries: number;
-	// Map order preserves the configured section order in the rendered summary.
-	readonly sectionCounts: ReadonlyMap<string, number>;
-	readonly contributorCount: number;
-}
 
 /**
  * One ordered, semantic Run Progress event. Events carry only run facts: no terminal cells, styles,
@@ -63,19 +52,13 @@ export type RunProgressEvent =
 	| {
 			readonly type: "generating-complete";
 			readonly stage: "Generating";
-			readonly summary: GenerationSummary;
+			readonly summary: ChangelogSummary;
 	  };
 
-/**
- * A sink for ordered Run Progress events. Implementations decide what, if anything, to display.
- */
 export interface RunProgress {
 	emit(event: RunProgressEvent): void;
 }
 
-/**
- * A Run Progress sink that discards every event, for quiet and stdout-only runs.
- */
 export const noRunProgress: RunProgress = {
 	emit: () => {},
 };

@@ -14,9 +14,10 @@
  * limitations under the License.
  */
 
+import type { ChangelogSummary } from "./changelog.js";
 import type { Repository } from "./github-context.js";
 import { commitUrl, ticketUrl } from "./links.js";
-import type { GenerationSummary, RunProgress } from "./progress.js";
+import type { RunProgress } from "./progress.js";
 import type {
 	LookedUpTarget,
 	NotFoundTarget,
@@ -36,7 +37,6 @@ import type {
 import {
 	type Aggregate,
 	type AggregatedCommit,
-	type CommitCandidate,
 	targetKey,
 	type TicketTarget,
 } from "./ticket-references.js";
@@ -45,12 +45,10 @@ function plural(count: number, singular: string, plural = `${singular}s`): strin
 	return count === 1 ? singular : plural;
 }
 
-// A styled count cell, the recurring `{ text: String(n), style }` building block of the run view.
 function countCell(value: number, style: Cell["style"]): Cell {
 	return { text: String(value), style };
 }
 
-// A block title: a verb, an accent count, and the pluralized noun (e.g. "Scanned 3 commits").
 function titleLine(verb: string, count: number, noun: string, plurals?: string): Cell[] {
 	return [
 		{ text: `${verb} ` },
@@ -59,15 +57,10 @@ function titleLine(verb: string, count: number, noun: string, plurals?: string):
 	];
 }
 
-// A fact line: an accent (or warning) count followed by its faint label, the recurring shape of the
-// Scanned and Looked up block notes.
 function factLine(count: number, label: string, style: Cell["style"] = "accent"): Cell[] {
 	return [countCell(count, style), { text: label, style: "faint" }];
 }
 
-/**
- * The semantic Scanned-block facts, derived from Aggregated Ticket References, for the view notes.
- */
 interface ScannedSummary {
 	readonly missing: number;
 
@@ -133,20 +126,21 @@ interface ScannedRow {
 	readonly missing: boolean;
 }
 
-/**
- * Build one atomic reference item at a given emphasis, linked to its Ticket Target page.
- */
+function targetDisplay(
+	target: TicketTarget,
+	repo: Repository,
+): Pick<Cell, "text" | "link"> {
+	return { text: targetKey(target), link: ticketUrl(repo, target) };
+}
+
 function referenceItem(
 	target: TicketTarget,
 	emphasis: Emphasis,
 	repo: Repository,
 ): ReferenceItem {
-	return { text: targetKey(target), emphasis, link: ticketUrl(repo, target) };
+	return { ...targetDisplay(target, repo), emphasis };
 }
 
-/**
- * One row per scanned commit.
- */
 function commitRows(commits: readonly ScannedRow[], repo: Repository): CommitRow[] {
 	return commits.map((commit) => {
 		const seen = new Set<string>();
@@ -182,11 +176,6 @@ function commitRows(commits: readonly ScannedRow[], repo: Repository): CommitRow
 	});
 }
 
-/**
- * Cache provenance shown as block items: how many tickets were served from the local cache vs.
- * loaded from GitHub. Both counts use the accent so the number stands out from its faint
- * label; the label words distinguish the cheap cache path from a fresh fetch.
- */
 function lookupNotes(cached: number, fetched: number): Cell[][] {
 	const notes: Cell[][] = [];
 	if (cached > 0) {
@@ -208,9 +197,8 @@ function lookedUpReferences(
 	repo: Repository,
 ): Cell[] {
 	return outcomes.map(({ target, found }) => ({
-		text: targetKey(target),
+		...targetDisplay(target, repo),
 		style: found ? "accent" : "warning",
-		link: ticketUrl(repo, target),
 	}));
 }
 
@@ -223,24 +211,19 @@ function notFoundRows(references: readonly NotFoundTarget[], repo: Repository): 
 				link: commitUrl(repo, failure.commit.sha),
 			},
 			{
-				text: targetKey(failure.target),
+				...targetDisplay(failure.target, repo),
 				style: "warning",
-				link: ticketUrl(repo, failure.target),
 			},
 			{ text: failure.commit.summary, style: "faint" },
 		],
 	}));
 }
 
-/**
- * The accumulated run facts the ledger summarizes once generation completes.
- */
-interface LedgerFacts {
+interface LedgerFacts extends ChangelogSummary {
 	readonly commits: number;
 	readonly uniqueTargets: number;
 	readonly candidateNotFound: number;
 	readonly creditNotFound: number;
-	readonly summary: GenerationSummary;
 }
 
 /**
@@ -251,7 +234,7 @@ interface LedgerFacts {
 function ledgerRows(facts: LedgerFacts): Row[] {
 	const entries: Array<[number, string, Cell["style"]]> = [
 		[facts.commits, plural(facts.commits, "commit"), "accent"],
-		...[...facts.summary.sectionCounts].map(
+		...[...facts.sectionCounts].map(
 			([bucket, value]): [number, string, Cell["style"]] => [
 				value,
 				bucket,
@@ -261,11 +244,7 @@ function ledgerRows(facts: LedgerFacts): Row[] {
 		[facts.uniqueTargets, plural(facts.uniqueTargets, "ticket reference"), "accent"],
 		[facts.candidateNotFound, "tickets not found", "warning"],
 		[facts.creditNotFound, "credit-only tickets not found", "warning"],
-		[
-			facts.summary.contributorCount,
-			plural(facts.summary.contributorCount, "contributor"),
-			"accent",
-		],
+		[facts.contributorCount, plural(facts.contributorCount, "contributor"), "accent"],
 	];
 	return entries
 		.filter(([value]) => value > 0)
@@ -286,9 +265,6 @@ export function finalLine(output: string, outputUrl: string): Cell[] {
 	return [{ text: "Created " }, { text: output, link: outputUrl }];
 }
 
-/**
- * How much commit detail the Scanned block lists, normalized by the CLI before the run lifecycle.
- */
 export type CommitDetail = "none" | "missing" | "all";
 
 export interface RunViewOptions {
@@ -413,10 +389,7 @@ export function createPreparingView(renderer: Renderer, debug: boolean): RunProg
 	};
 }
 
-/**
- * Every distinct Ticket Target across one commit's display roles.
- */
-function commitTargets(commit: AggregatedCommit): CommitCandidate[] {
+function commitTargets(commit: AggregatedCommit): TicketTarget[] {
 	return [
 		...commit.candidates,
 		...commit.credits,
@@ -425,23 +398,10 @@ function commitTargets(commit: AggregatedCommit): CommitCandidate[] {
 	];
 }
 
-/**
- * Whether a commit carries no Ticket Reference occurrence of any qualifier. Sums the role-array
- * lengths directly rather than building a combined array just to measure it.
- */
 function isMissing(commit: AggregatedCommit): boolean {
-	return (
-		commit.candidates.length +
-			commit.credits.length +
-			commit.demoted.length +
-			commit.related.length ===
-		0
-	);
+	return commitTargets(commit).length === 0;
 }
 
-/**
- * Reduce Aggregated Ticket References to the semantic Scanned-block facts.
- */
 function scannedSummary(aggregate: Aggregate): ScannedSummary {
 	const unique = new Set<string>();
 	const pullRequest = new Set<string>();
@@ -451,32 +411,26 @@ function scannedSummary(aggregate: Aggregate): ScannedSummary {
 			missing += 1;
 		}
 		for (const candidate of commitTargets(commit)) {
-			unique.add(targetKey(candidate.target));
+			unique.add(targetKey(candidate));
 		}
 		for (const credit of commit.credits) {
-			pullRequest.add(targetKey(credit.target));
+			pullRequest.add(targetKey(credit));
 		}
 	}
 	return { missing, uniqueTargets: unique.size, pullRequestTargets: pullRequest.size };
 }
 
-/**
- * Reduce one aggregated commit to its display row, newest commits first for the listing.
- */
 function scannedRows(aggregate: Aggregate): ScannedRow[] {
-	const targets = (candidates: readonly CommitCandidate[]): TicketTarget[] =>
-		candidates.map((candidate) => candidate.target);
-
 	return [...aggregate.commits].reverse().map((commit) => ({
 		sha: commit.commit.sha,
 		author: commit.commit.author,
 		summary: commit.commit.summary,
-		lead: commit.lead?.target,
+		lead: commit.lead,
 
-		candidates: targets(commit.candidates.slice(1)),
-		credits: targets(commit.credits),
-		demoted: targets(commit.demoted),
-		related: targets(commit.related),
+		candidates: commit.candidates.slice(1),
+		credits: commit.credits,
+		demoted: commit.demoted,
+		related: commit.related,
 		missing: isMissing(commit),
 	}));
 }
@@ -548,14 +502,13 @@ function excludedSection(
  */
 function excludedReferences(excluded: readonly TicketTarget[], repo: Repository): Cell[] {
 	return excluded.map((target) => ({
-		text: targetKey(target),
+		...targetDisplay(target, repo),
 		style: "accent",
-		link: ticketUrl(repo, target),
 	}));
 }
 
 function generatedView(
-	summary: GenerationSummary,
+	summary: ChangelogSummary,
 	scanned: ({ commits: number } & ScannedSummary) | undefined,
 	resolved: ResolvedTicketReferences | undefined,
 ): StepSummary {
@@ -564,7 +517,7 @@ function generatedView(
 		uniqueTargets: scanned?.uniqueTargets ?? 0,
 		candidateNotFound: resolved?.candidateNotFound.length ?? 0,
 		creditNotFound: resolved?.creditNotFound.length ?? 0,
-		summary,
+		...summary,
 	};
 	return {
 		title: titleLine("Documented", summary.documentedEntries, "entry", "entries"),

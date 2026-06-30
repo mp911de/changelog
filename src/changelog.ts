@@ -25,13 +25,15 @@ export interface GenerateOptions {
 	readonly all: boolean;
 }
 
-export interface ChangelogResult {
-	readonly markdown: string;
-	// Summary keys keep counts stable when a section title changes.
+export interface ChangelogSummary {
 	readonly sectionCounts: ReadonlyMap<string, number>;
 	readonly contributorCount: number;
-	// Entries actually rendered in the document, after exclusion and `--all` handling.
 	readonly documentedEntries: number;
+}
+
+export interface ChangelogResult {
+	readonly markdown: string;
+	readonly summary: ChangelogSummary;
 }
 
 /**
@@ -105,9 +107,12 @@ export function generateChangelog(
 
 	return {
 		markdown: blocks.join("\n"),
-		sectionCounts,
-		contributorCount: contributors.length,
-		documentedEntries,
+		summary: {
+			// Summary keys keep counts stable when a section title changes.
+			sectionCounts,
+			contributorCount: contributors.length,
+			documentedEntries,
+		},
 	};
 }
 

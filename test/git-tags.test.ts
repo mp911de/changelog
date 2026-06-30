@@ -93,28 +93,38 @@ describe("version resolution against a real repository", () => {
 	});
 
 	it("resolves a maintenance branch from a remote-tracking ref when no local branch exists", async () => {
-		expect(await resolveBranch("4.0.x", repo)).toBe("origin/4.0.x");
+		expect(await resolveBranch("4.0.x", repo)).toEqual({
+			ref: "refs/remotes/origin/4.0.x",
+			label: "origin/4.0.x",
+		});
 	});
 
-	it("prefers a local maintenance branch", async () => {
-		expect(await resolveBranch("5.0.x", repo)).toBe("5.0.x");
+	it("prefers a local maintenance branch and returns its fully-qualified ref", async () => {
+		expect(await resolveBranch("5.0.x", repo)).toEqual({
+			ref: "refs/heads/5.0.x",
+			label: "5.0.x",
+		});
 	});
 
 	it("returns undefined for an unknown maintenance branch", async () => {
 		expect(await resolveBranch("9.9.x", repo)).toBeUndefined();
 	});
 
-	it("resolves an upcoming patch to its predecessor and the remote-tracking branch tip", async () => {
+	it("resolves an upcoming patch to its predecessor and the fully-qualified branch ref", async () => {
 		expect(await resolveAutoRange("4.0.7", gitRepoRefs(repo))).toEqual({
-			from: "4.0.6",
-			to: "origin/4.0.x",
+			from: { ref: "4.0.6", label: "4.0.6", kind: "tag" },
+			to: {
+				ref: "refs/remotes/origin/4.0.x",
+				label: "origin/4.0.x",
+				kind: "branch",
+			},
 		});
 	});
 
 	it("resolves a line-opener to the previous line opener and HEAD", async () => {
 		expect(await resolveAutoRange("4.1.0", gitRepoRefs(repo))).toEqual({
-			from: "4.0.0",
-			to: "HEAD",
+			from: { ref: "4.0.0", label: "4.0.0", kind: "tag" },
+			to: { ref: "HEAD", label: "HEAD", kind: "head" },
 		});
 	});
 

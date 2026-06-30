@@ -21,17 +21,15 @@ import { isAbsolute, resolve } from "node:path";
 import { argv, stderr, stdout } from "node:process";
 import { fileURLToPath, pathToFileURL } from "node:url";
 
-import { Command, InvalidArgumentError } from "commander";
+import { Command, InvalidArgumentError, Option } from "commander";
 
 import { writeFileAtomically } from "./atomic-file.js";
-import { loadCache, type TicketCache } from "./cache.js";
-import { loadOrCreateConfig } from "./config.js";
 import { hasCode, hasStringProp } from "./errors.js";
-import { classifyRef, gitRepoRefs, resolveCommit } from "./git.js";
-import { type Repository, resolveGitHubContext } from "./github-context.js";
-import { headerFields } from "./links.js";
-import { createTargetLookup } from "./lookup.js";
-import { type Lookup, runPipeline } from "./pipeline.js";
+import { gitRepoRefs } from "./git.js";
+import { defaultGitHubAdapter, type GitHubAdapterFactory } from "./github-adapter.js";
+import type { Repository } from "./github-context.js";
+import { runPipeline } from "./pipeline.js";
+import { prepareRun, resolveHeaderFields } from "./prepare.js";
 import { noRunProgress, type RunProgress, runStage } from "./progress.js";
 import { createRenderer, createTraceWriter, type OutputStream } from "./render.js";
 import { type CliRange, parseRange, resolveAutoRange } from "./version.js";
@@ -43,6 +41,8 @@ import {
 	finalLine,
 	type RunViewOptions,
 } from "./view.js";
+
+export type { GitHubAdapterFactory } from "./github-adapter.js";
 
 const require = createRequire(import.meta.url);
 const pkg = require("../package.json") as { version: string };
@@ -62,22 +62,10 @@ interface CliInvocation {
 	readonly repo?: string;
 }
 
-/**
- * The GitHub adapter replaces the real {@code gh}-backed context resolution and lookup creation
- * for testing. When not provided, the real implementation is used.
- */
-export type GitHubAdapterFactory = (options: {
-	readonly cwd: string;
-	readonly repoOverride?: string;
-	readonly trace?: (line: string) => void;
-}) => Promise<{
-	readonly repo: { readonly owner: string; readonly repo: string };
-	readonly login: string;
-	readonly createLookup: (options: {
-		readonly cache: TicketCache;
-		readonly refresh: boolean;
-	}) => Lookup;
-}>;
+// Commander exposes parsed "-C" as "C" and leaves the option object structurally loose.
+type CommanderOptions = Omit<CliInvocation, "range" | "cwd"> & {
+	readonly C?: string;
+};
 
 /**
  * Injectable runtime dependencies for a CLI invocation. When not provided, production defaults
@@ -93,43 +81,22 @@ export interface Runtime {
 	readonly githubAdapter?: GitHubAdapterFactory;
 }
 
-const defaultGitHubAdapter: GitHubAdapterFactory = async ({
-	cwd,
-	repoOverride,
-	trace,
-}) => {
-	// One shared GitHub client serves preparation and lookup, so its request trace is routed to
-	// whichever stage's debug is active: the prepare trace during preparation, each lookup call's
-	// own debug for the duration of that call.
-	let activeTrace = trace;
-	const forward = trace ? (line: string) => activeTrace?.(line) : undefined;
-	const context = await resolveGitHubContext({
-		repo: repoOverride,
-		cwd,
-		trace: forward,
-	});
-	return {
-		repo: context.repo,
-		login: context.login,
-		createLookup: ({ cache, refresh }) => {
-			const lookup = createTargetLookup({
-				octokit: context.octokit,
-				repo: context.repo,
-				cache,
-				refresh,
-			});
-			// The aggregate carries lookup flags to the seam; GitHub resolution needs only the target.
-			return async (targets, debug) => {
-				activeTrace = debug ?? trace;
-				try {
-					return await lookup(targets.map((flagged) => flagged.target));
-				} finally {
-					activeTrace = trace;
-				}
-			};
-		},
-	};
-};
+function toInvocation(
+	target: string,
+	to: string | undefined,
+	opts: CommanderOptions,
+	invocationDirectory: string,
+): CliInvocation {
+	const { C: directory, ...invocation } = opts;
+	const cwd = directory ?? invocationDirectory;
+	const range = parseRange(target, to);
+	if (invocation.resolvePrevious && range.mode !== "auto") {
+		throw new InvalidArgumentError(
+			"--resolve-previous expects a single <version>, not a <from> <to> or <from>..<to> range",
+		);
+	}
+	return { range, cwd, ...invocation };
+}
 
 function buildProgram(
 	action: (invocation: CliInvocation) => Promise<void>,
@@ -205,31 +172,15 @@ function buildProgram(
 			"print the resolved previous version tag and exit",
 			false,
 		)
-		.option("--debug", "trace the git and GitHub calls being made", false)
+		.addOption(
+			new Option("--debug", "trace the git and GitHub calls being made")
+				.default(false)
+				.conflicts("quiet"),
+		)
 		.option("-q, --quiet", "suppress all output except errors", false)
 		.action(
-			async (
-				target: string,
-				to: string | undefined,
-				// Commander types its parsed options loosely; this annotation mirrors the .option()
-				// declarations above (flag names mapped to their camelCase keys) and is not verified by
-				// commander, so it must be kept in step with them by hand.
-				opts: Omit<CliInvocation, "range" | "cwd"> & { C?: string },
-			) => {
-				const { C: directory, ...invocation } = opts;
-				const cwd = directory ?? invocationDirectory;
-				if (invocation.quiet && invocation.debug) {
-					throw new InvalidArgumentError(
-						"--quiet and --debug cannot be combined",
-					);
-				}
-				const range = parseRange(target, to);
-				if (invocation.resolvePrevious && range.mode !== "auto") {
-					throw new InvalidArgumentError(
-						"--resolve-previous expects a single <version>, not a <from> <to> or <from>..<to> range",
-					);
-				}
-				await action({ range, cwd, ...invocation });
+			async (target: string, to: string | undefined, opts: CommanderOptions) => {
+				await action(toInvocation(target, to, opts, invocationDirectory));
 			},
 		);
 	return program;
@@ -256,12 +207,6 @@ function commitDetailOf(invocation: CliInvocation): CommitDetail {
 	return "none";
 }
 
-/**
- * Everything the run needs to present itself, resolved once from the invocation: the renderer the
- * header and final line use, the Preparing progress sink (which runs before the repository is known),
- * a factory for the run's progress sink once Preparing resolves the repository, and where the
- * finished changelog is written.
- */
 interface Presentation {
 	readonly renderer: ReturnType<typeof createRenderer> | undefined;
 	readonly preparing: RunProgress;
@@ -282,15 +227,12 @@ function resolvePresentation(
 ): Presentation {
 	const { out, err } = runtime;
 	const toStdout = invocation.output === "-";
-	// -O - writes the changelog to stdout, so the run view stays off it; -q silences it outright.
 	const renderer = invocation.quiet || toStdout ? undefined : createRenderer(out);
 	const viewOptions: RunViewOptions = {
 		commitDetail: commitDetailOf(invocation),
 		showLookupOutcomes: invocation.showAll,
 		debug: invocation.debug,
 	};
-	// Without a renderer, --debug still traces to stderr and anything else is silent; this fallback
-	// serves both Preparing and the pipeline in that case. With a renderer the view is built per phase.
 	const fallback: RunProgress =
 		!renderer && invocation.debug
 			? createDebugView(createTraceWriter(err))
@@ -338,7 +280,7 @@ async function execute(
 			invocation.range.target,
 			gitRepoRefs(cwd, trace),
 		);
-		out.write(`${from}\n`);
+		out.write(`${from.ref}\n`);
 		return;
 	}
 
@@ -352,90 +294,42 @@ async function execute(
 			"Preparing",
 			async (debug) => {
 				const trace = invocation.debug ? debug : undefined;
-				// In auto mode the bounds come from the tags; in explicit mode they are given verbatim.
-				const { from, to } =
-					invocation.range.mode === "auto"
-						? await resolveAutoRange(
-								invocation.range.target,
-								gitRepoRefs(cwd, trace),
-							)
-						: { from: invocation.range.from, to: invocation.range.to };
-				// Resolve only the header values that will be rendered; scanning validates the range later.
-				const resolvedTo = renderer ? await resolveCommit(to, cwd, trace) : "";
-				const resolvedFrom =
-					renderer && from === "HEAD"
-						? from === to
-							? resolvedTo
-							: await resolveCommit(from, cwd, trace)
-						: "";
-				const adapterResult = await runtime.githubAdapter({
+				const run = await prepareRun({
+					range: invocation.range,
 					cwd,
 					repoOverride: invocation.repo,
+					refresh: invocation.refresh,
+					githubAdapter: runtime.githubAdapter,
 					trace,
-				});
-				const { repo, login } = adapterResult;
-
-				// Classify the bounds for their header links only when a renderer will show them.
-				const fromKind = renderer
-					? await classifyRef(from, cwd, trace)
-					: "commit";
-				const toKind = renderer ? await classifyRef(to, cwd, trace) : "commit";
-				const config = await loadOrCreateConfig({
-					baseDir: cwd,
-					login,
-					owner: repo.owner,
-				});
-				const cache = await loadCache({
-					baseDir: cwd,
-					slug: repo.repo,
 					diagnostic: debug,
 				});
-				const lookup = adapterResult.createLookup({
-					cache,
-					refresh: invocation.refresh,
-				});
-				return {
-					repo,
-					from,
-					to,
-					fromKind,
-					toKind,
-					fromSha: resolvedFrom,
-					toSha: resolvedTo,
-					config,
-					lookup,
-				};
+				const header = renderer
+					? await resolveHeaderFields(run.range, {
+							repo: run.repo,
+							version: pkg.version,
+							output: invocation.output,
+							outputUrl,
+							cwd,
+							trace,
+						})
+					: undefined;
+				return { run, header };
 			},
 			() => ({ type: "preparing-complete", stage: "Preparing" }),
 		);
-		const { repo, from, to, fromKind, toKind, fromSha, toSha, config, lookup } =
-			prepared;
+		const { run, header } = prepared;
+		const { repo, range, config, lookup } = run;
 
-		// The repository is now known, so the run view can be built with it: no mutation of options
-		// after construction, and Preparing has already completed on its own sink.
 		const progress = runProgress(repo);
 
-		if (renderer) {
-			renderer.headerBox(
-				headerFields({
-					repo,
-					version: pkg.version,
-					from,
-					to,
-					fromKind,
-					toKind,
-					fromSha,
-					toSha,
-					output: invocation.output,
-					outputUrl,
-				}),
-			);
+		if (renderer && header) {
+			renderer.headerBox(header);
 			renderer.blank();
 		}
 
 		const markdown = await runPipeline({
-			from,
-			to,
+			from: range.from.ref,
+			to: range.to.ref,
 			cwd,
 			repository: repo,
 			config,
@@ -484,7 +378,6 @@ export async function main(args: string[] = argv, runtime?: Runtime): Promise<nu
 	const err = runtime?.stderr ?? stderr;
 	const baseCwd = runtime?.cwd ?? process.cwd();
 
-	// No arguments at all: print the slim synopsis to stderr and return a usage error code.
 	if (args.length <= 2) {
 		err.write(`${usageText()}\n`);
 		return 2;
@@ -519,7 +412,6 @@ export async function main(args: string[] = argv, runtime?: Runtime): Promise<nu
 			const code = error.code ?? "";
 			const exitCode = error.exitCode ?? 2;
 			if (exitCode === 0) {
-				// Version and help are success paths; nothing to print.
 				return 0;
 			}
 			// InvalidArgumentError thrown from our action is not printed by commander; print it here.
@@ -527,7 +419,6 @@ export async function main(args: string[] = argv, runtime?: Runtime): Promise<nu
 			if (code === "commander.invalidArgument") {
 				err.write(`error: ${error.message}\n`);
 			}
-			// Treat all non-zero commander errors as usage errors (exit code 2).
 			return 2;
 		}
 		const message =

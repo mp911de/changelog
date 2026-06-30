@@ -30,11 +30,11 @@ import {
 } from "./ticket-references.js";
 
 /**
- * Resolve a batch of deduplicated, flagged Ticket Targets to role-free GitHub facts. The optional
+ * Resolve a batch of deduplicated Ticket Targets to role-free GitHub facts. The optional
  * {@code debug} traces GitHub requests into the Looking up stage.
  */
 export type Lookup = (
-	targets: readonly LookupTarget[],
+	targets: readonly TicketTarget[],
 	debug?: (line: string) => void,
 ) => Promise<LookupFacts>;
 
@@ -49,16 +49,9 @@ export interface PipelineOptions {
 	readonly progress?: RunProgress;
 }
 
-/**
- * Run the three visible stages and return only the Changelog Document. Scanning reads Git history,
- * parses commit messages, and builds Aggregated Ticket References; Looking up resolves the requested
- * Ticket Targets into Resolved Ticket References; Generating renders the document. Each stage reports
- * its facts as Run Progress; nothing else is returned.
- */
 export async function runPipeline(options: PipelineOptions): Promise<string> {
 	const progress = options.progress ?? noRunProgress;
 
-	// Parsing happens during scanning, so the Scanned facts are ready when the scan completes; there is no separate Parsing stage.
 	const aggregate = await runStage(
 		progress,
 		"Scanning",
@@ -118,17 +111,13 @@ export async function runPipeline(options: PipelineOptions): Promise<string> {
 		(result) => ({
 			type: "generating-complete",
 			stage: "Generating",
-			summary: {
-				documentedEntries: result.documentedEntries,
-				sectionCounts: result.sectionCounts,
-				contributorCount: result.contributorCount,
-			},
+			summary: result.summary,
 		}),
 	).then((result) => result.markdown);
 }
 
 /**
- * Split flagged targets into those to look up and those held back by followReferences. A reference
+ * Split flagged targets into plain lookup targets and those held back by followReferences. A reference
  * to the current repository (no explicit repository) is always followed; a cross-repository reference
  * is followed only when its `owner/repo` matches the allow-list. Absent or empty patterns follow
  * everything.
@@ -136,16 +125,16 @@ export async function runPipeline(options: PipelineOptions): Promise<string> {
 function partitionByFollow(
 	targets: readonly LookupTarget[],
 	patterns: readonly string[] | undefined,
-): { followed: LookupTarget[]; excluded: TicketTarget[] } {
+): { followed: TicketTarget[]; excluded: TicketTarget[] } {
 	const matches = followReferenceMatcher(patterns ?? []);
-	const followed: LookupTarget[] = [];
+	const followed: TicketTarget[] = [];
 	const excluded: TicketTarget[] = [];
 	for (const flagged of targets) {
 		const repository = flagged.target.repository;
 		if (repository && !matches(`${repository.owner}/${repository.repo}`)) {
 			excluded.push(flagged.target);
 		} else {
-			followed.push(flagged);
+			followed.push(flagged.target);
 		}
 	}
 	return { followed, excluded };

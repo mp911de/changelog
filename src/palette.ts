@@ -49,7 +49,6 @@ export interface Cell {
 	readonly link?: string;
 	readonly align?: "left" | "right";
 
-	// Ornaments rendered tight against the (padded) text with their own style.
 	readonly prefix?: Affix;
 	readonly suffix?: Affix;
 }
@@ -84,7 +83,6 @@ const HEX = {
 	accent: "#89b4fa",
 	warning: "#eda757",
 	mauve: "#CBA6F7",
-	// A light green for the success glyph.
 	green: "#a6e3a1",
 	// Three descending gray levels (light, medium, dark) for the reference emphasis ladder; faint
 	// (SGR dim) is fainter still. Limited-color terminals downsample adjacent levels to one ANSI

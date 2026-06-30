@@ -20,7 +20,7 @@ import type { ChangelogConfig } from "../src/config.js";
 import type { ResolvedTicket } from "../src/lookup.js";
 import { runPipeline } from "../src/pipeline.js";
 import type { RunProgress, RunProgressEvent } from "../src/progress.js";
-import { type LookupTarget, targetKey } from "../src/ticket-references.js";
+import { targetKey, type TicketTarget } from "../src/ticket-references.js";
 import { FixtureRepo } from "./fixture-repo.js";
 
 function recordingProgress(): { events: RunProgressEvent[] } & RunProgress {
@@ -34,10 +34,10 @@ function recordingProgress(): { events: RunProgressEvent[] } & RunProgress {
 }
 
 function mockLookup(tickets: Record<string, ResolvedTicket>) {
-	return async (targets: readonly LookupTarget[]) => {
+	return async (targets: readonly TicketTarget[]) => {
 		const facts = new Map<string, ResolvedTicket>();
 		const notFoundTargets = [];
-		for (const { target } of targets) {
+		for (const target of targets) {
 			const key = targetKey(target);
 			const ticket = tickets[key] ?? tickets[target.id];
 			if (ticket) {
@@ -149,10 +149,10 @@ describe("runPipeline", () => {
 			"forbidden/repo#9": ticket("#9", "Forbidden cross repo", ["enhancement"]),
 		};
 		const looked: string[] = [];
-		const lookup = async (targets: readonly LookupTarget[]) => {
+		const lookup = async (targets: readonly TicketTarget[]) => {
 			const facts = new Map<string, ResolvedTicket>();
 			const notFoundTargets = [];
-			for (const { target } of targets) {
+			for (const target of targets) {
 				const key = targetKey(target);
 				looked.push(key);
 				if (known[key]) {
@@ -434,7 +434,7 @@ describe("runPipeline", () => {
 				debug?.("GET /repos/o/r/issues/1 → 200");
 				return {
 					facts: new Map(),
-					notFoundTargets: targets.map((purposed) => purposed.target),
+					notFoundTargets: [...targets],
 					cached: 0,
 					fetched: 0,
 				};

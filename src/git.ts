@@ -18,7 +18,7 @@ import { execFile } from "node:child_process";
 import { promisify } from "node:util";
 
 import { hasCode } from "./errors.js";
-import type { RepoRefs } from "./version.js";
+import type { RepoRefs, ResolvedBranch } from "./version.js";
 
 const execFileAsync = promisify(execFile);
 
@@ -48,10 +48,6 @@ export type RefKind = "commit" | "tag" | "branch" | "head";
 const NUL = "\0";
 const NUL_FORMAT = "%x00";
 
-/**
- * Use the local Git process so scanning does not require a network connection or a second
- * implementation of repository access.
- */
 export async function scanCommits(
 	from: string,
 	to: string,
@@ -98,11 +94,7 @@ export async function resolveCommit(
 	trace?: Trace,
 ): Promise<string> {
 	try {
-		const stdout = await runGit(
-			["rev-parse", "--verify", "--quiet", "--end-of-options", `${ref}^{commit}`],
-			cwd,
-			{ trace },
-		);
+		const stdout = await runGit(revParseCommit(ref), cwd, { trace });
 		return stdout.trim();
 	} catch (error) {
 		if (hasCode(error, 1)) {
@@ -112,9 +104,6 @@ export async function resolveCommit(
 	}
 }
 
-/**
- * List every tag in the repository (`git tag`).
- */
 export async function listTags(cwd: string, trace?: Trace): Promise<string[]> {
 	const stdout = await runGit(["tag", "--list"], cwd, { trace });
 	return nonEmptyLines(stdout);
@@ -122,26 +111,28 @@ export async function listTags(cwd: string, trace?: Trace): Promise<string[]> {
 
 /**
  * Resolve a Maintenance Branch name to a usable revision: a local branch takes precedence,
- * otherwise a remote-tracking branch (`origin` first, then any other remote). Returns the revision
- * to use as the upper bound, or undefined when no such branch exists.
+ * otherwise a remote-tracking branch (`origin` first, then any other remote). Returns the
+ * fully-qualified {@code ref} to use as the upper bound paired with its display {@code label}, or
+ * undefined when no such branch exists. The ref is fully qualified (`refs/heads/...`,
+ * `refs/remotes/...`) so a same-named tag cannot shadow the branch when Git resolves the range.
  */
 export async function resolveBranch(
 	name: string,
 	cwd: string,
 	trace?: Trace,
-): Promise<string | undefined> {
+): Promise<ResolvedBranch | undefined> {
 	if (await refExists(`refs/heads/${name}`, cwd, trace)) {
-		return name;
+		return { ref: `refs/heads/${name}`, label: name };
 	}
 	if (await refExists(`refs/remotes/origin/${name}`, cwd, trace)) {
-		return `origin/${name}`;
+		return { ref: `refs/remotes/origin/${name}`, label: `origin/${name}` };
 	}
 	for (const remote of await listRemotes(cwd, trace)) {
 		if (
 			remote !== "origin" &&
 			(await refExists(`refs/remotes/${remote}/${name}`, cwd, trace))
 		) {
-			return `${remote}/${name}`;
+			return { ref: `refs/remotes/${remote}/${name}`, label: `${remote}/${name}` };
 		}
 	}
 	return undefined;
@@ -174,9 +165,6 @@ export async function classifyRef(
 	return "commit";
 }
 
-/**
- * Back a {@link RepoRefs} with the local Git process so version resolution can run against it.
- */
 export function gitRepoRefs(cwd: string, trace?: Trace): RepoRefs {
 	return {
 		tags: () => listTags(cwd, trace),
@@ -186,11 +174,7 @@ export function gitRepoRefs(cwd: string, trace?: Trace): RepoRefs {
 
 async function refExists(ref: string, cwd: string, trace?: Trace): Promise<boolean> {
 	try {
-		await runGit(
-			["rev-parse", "--verify", "--quiet", "--end-of-options", `${ref}^{commit}`],
-			cwd,
-			{ trace },
-		);
+		await runGit(revParseCommit(ref), cwd, { trace });
 		return true;
 	} catch (error) {
 		// Exit code 1 from rev-parse --verify --quiet means the ref is absent; anything else is a real error.
@@ -211,6 +195,11 @@ function nonEmptyLines(stdout: string): string[] {
 		.split(/\r?\n/)
 		.map((line) => line.trim())
 		.filter((line) => line.length > 0);
+}
+
+// The canonical "resolve this ref to a commit"
+function revParseCommit(ref: string): string[] {
+	return ["rev-parse", "--verify", "--quiet", "--end-of-options", `${ref}^{commit}`];
 }
 
 /**

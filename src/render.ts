@@ -32,8 +32,6 @@ import {
 	SUCCESS,
 } from "./palette.js";
 
-// Re-export the rendering vocabulary so callers depend only on this module, while the
-// implementation is split across palette/reference-flow/block/live-reporter.
 export type { Affix, Capabilities, Cell, OutputStream, Row, Style } from "./palette.js";
 export { formatDuration } from "./palette.js";
 export type { CommitRow, Emphasis, ReferenceItem } from "./reference-flow.js";
@@ -44,9 +42,6 @@ export interface Renderer extends BlockReporter {
 
 	line(cells: readonly Cell[]): void;
 
-	/**
-	 * A standalone success line that matches a completed stage: the green check glyph then the cells.
-	 */
 	success(cells: readonly Cell[]): void;
 
 	blank(): void;
@@ -117,13 +112,8 @@ function staticReporter(stream: OutputStream, palette: Palette): BlockReporter {
 					// Non-TTY output is unbounded: every complete reference, no omission marker.
 					commit(
 						blockLines(palette, SUCCESS, {
-							title: summary.title,
+							...summary,
 							debugLines: debug,
-							notes: summary.notes,
-							rows: summary.rows,
-							commitRows: summary.commitRows,
-							flow: summary.flow,
-							excluded: summary.excluded,
 						}),
 					);
 				},

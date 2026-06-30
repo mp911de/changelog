@@ -35,14 +35,6 @@ export function ticketUrl(repo: Repository, target: TicketTarget): string {
 	return repoUrl(target.repository ?? repo, `/issues/${number}`);
 }
 
-function treeUrl(repo: Repository, ref: string): string {
-	return repoUrl(repo, `/tree/${ref}`);
-}
-
-function tagUrl(repo: Repository, ref: string): string {
-	return repoUrl(repo, `/releases/tag/${ref}`);
-}
-
 /**
  * Link a from/to revision to its GitHub page from its git-resolved {@link RefKind}: a tag's release
  * page, a branch's tree, a plain commit, or HEAD (resolved to its head commit).
@@ -59,9 +51,9 @@ function refUrl(
 		case "commit":
 			return commitUrl(repo, ref);
 		case "branch":
-			return treeUrl(repo, ref);
+			return repoUrl(repo, `/tree/${ref}`);
 		case "tag":
-			return tagUrl(repo, ref);
+			return repoUrl(repo, `/releases/tag/${ref}`);
 	}
 }
 
@@ -70,19 +62,14 @@ export interface HeaderParams {
 	readonly version: string;
 	readonly from: string;
 	readonly to: string;
-	// Git-resolved kinds of `from`/`to`, used to point each link at the right GitHub page.
 	readonly fromKind: RefKind;
 	readonly toKind: RefKind;
-	// Full sha of `from`, resolved only when `from` is HEAD; `toSha` is always the head of the range.
 	readonly fromSha: string;
 	readonly toSha: string;
 	readonly output: string;
 	readonly outputUrl: string;
 }
 
-/**
- * Build the header box fields, linking the from/to revisions and the resolved range sha.
- */
 export function headerFields(params: HeaderParams): HeaderFields {
 	const { repo } = params;
 	return {

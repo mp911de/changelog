@@ -63,9 +63,6 @@ type TargetOutcome =
 	| { readonly kind: "not-found"; readonly target: TicketTarget }
 	| ({ readonly kind: "failed" } & TargetFailure);
 
-/**
- * Focused lookup over deduplicated Ticket Targets.
- */
 export function createTargetLookup(options: TargetLookupOptions) {
 	const { octokit, repo, cache, refresh } = options;
 	const limit = pLimit(CONCURRENCY);
