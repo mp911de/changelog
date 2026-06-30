@@ -162,4 +162,39 @@ describe("resolveAutoRange", () => {
 		expect(await resolveAutoRange("v4.1.0", refs)).toEqual(bare);
 		expect(bare).toEqual({ from: "4.0.0", to: "HEAD" });
 	});
+
+	it("resolves a first service release from GA to the maintenance branch tip", async () => {
+		const refs = repo({
+			tags: async () => ["4.0.0"],
+			resolveBranch: async (name) =>
+				name === "4.0.x" ? "origin/4.0.x" : undefined,
+		});
+
+		expect(await resolveAutoRange("4.0.0.SR1", refs)).toEqual({
+			from: "4.0.0",
+			to: "origin/4.0.x",
+		});
+	});
+
+	it("resolves a later service release from the previous service-release tag", async () => {
+		const refs = repo({
+			tags: async () => ["4.0.0", "4.0.0.SR1"],
+			resolveBranch: async (name) =>
+				name === "4.0.x" ? "origin/4.0.x" : undefined,
+		});
+
+		expect(await resolveAutoRange("4.0.0.SR2", refs)).toEqual({
+			from: "4.0.0.SR1",
+			to: "origin/4.0.x",
+		});
+	});
+
+	it("regenerates an already-tagged service release against its tag", async () => {
+		const refs = repo({ tags: async () => ["4.0.0", "4.0.0.SR1"] });
+
+		expect(await resolveAutoRange("4.0.0.SR1", refs)).toEqual({
+			from: "4.0.0",
+			to: "4.0.0.SR1",
+		});
+	});
 });

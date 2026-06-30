@@ -222,7 +222,7 @@ Given a single version, `changelog` resolves the commit range from the repositor
 changelog 4.0.4
 ----
 
-Supported forms: SemVer (`4.0.0`), shortened forms (`4`, `4.0`), a `v` prefix (`v4.0.0`), Spring-style qualifiers (`4.0.0.RELEASE`, `4.0.0.Final`), and pre-releases (`4.0.0-M1`, `4.0.0-RC1`, `4.0.0.SNAPSHOT`).
+Supported forms: SemVer (`4.0.0`), shortened forms (`4`, `4.0`), a `v` prefix (`v4.0.0`), Spring-style GA qualifiers (`4.0.0.RELEASE`, `4.0.0.Final`), service releases (`4.0.0.SR1`), and pre-releases (`4.0.0-M1`, `4.0.0-RC1`, `4.0.0.SNAPSHOT`).
 
 * *Lower bound* (`from`): the previous release.
 A patch uses the previous patch (`4.0.4` against `4.0.3`).

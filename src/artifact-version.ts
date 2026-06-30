@@ -17,16 +17,74 @@
 /**
  * A tag or release target parsed from any supported spelling. {@link components} are the numeric
  * parts as written (unpadded) so a Maintenance Branch and Predecessor can be derived; comparison
- * pads with zeros so `4`, `4.0` and `4.0.0` are equal. Parsing is a preparatory stage — the
- * selection rules work on the numeric form and the Release/Pre-release flag.
+ * pads with zeros so `4`, `4.0` and `4.0.0` are equal before applying the stable Qualifier order.
  */
 export interface ArtifactVersion {
 	readonly raw: string;
 	readonly components: readonly number[];
 	readonly isRelease: boolean;
+	readonly qualifier: VersionQualifier;
 }
 
 const SHAPE = /^(\d+(?:\.\d+)*)(?:([.-])(.+))?$/;
+const NUMERIC_QUALIFIER = /^\d+(?:\.\d+)*$/;
+const SINGLE_SEGMENT_QUALIFIER = /^([a-zA-Z]+)([.-])?(\d*)$/;
+const SNAPSHOT_ORDER = 0;
+const KNOWN_PRE_RELEASE_OFFSET = 1;
+const GENERIC_ORDER = 16;
+const RELEASE_ORDER = 17;
+const SERVICE_RELEASE_ORDER = 18;
+const TYPE_ORDER = new Map<string, number>([
+	["", 0],
+	["dev", 1],
+	["nightly", 2],
+	["canary", 3],
+	["experimental", 4],
+	["alpha", 5],
+	["a", 6],
+	["beta", 7],
+	["b", 8],
+	["pre", 9],
+	["preview", 10],
+	["m", 11],
+	["next", 12],
+	["rc", 13],
+	["cr", 14],
+]);
+
+type VersionQualifier =
+	| {
+			readonly kind: "snapshot" | "pre-release" | "release";
+			readonly order: number;
+			readonly identifiers: readonly Identifier[];
+	  }
+	| {
+			readonly kind: "generic";
+			readonly order: typeof GENERIC_ORDER;
+			readonly genericText: string;
+	  }
+	| {
+			readonly kind: "service-release";
+			readonly order: typeof SERVICE_RELEASE_ORDER;
+			readonly identifiers: readonly Identifier[];
+	  };
+
+interface Identifier {
+	readonly raw: string;
+	readonly numeric?: bigint;
+}
+
+const RELEASE_QUALIFIER: VersionQualifier = {
+	kind: "release",
+	order: RELEASE_ORDER,
+	identifiers: [],
+};
+
+const SNAPSHOT_QUALIFIER: VersionQualifier = {
+	kind: "snapshot",
+	order: SNAPSHOT_ORDER,
+	identifiers: [],
+};
 
 /**
  * Parse {@code raw}; returns {@code null} when it is not a recognized version spelling.
@@ -35,6 +93,10 @@ export function parseArtifactVersion(raw: string): ArtifactVersion | null {
 	let text = raw.trim();
 	if (text.startsWith("v") || text.startsWith("V")) {
 		text = text.slice(1);
+	}
+	const metadataIndex = text.indexOf("+");
+	if (metadataIndex !== -1) {
+		text = text.slice(0, metadataIndex);
 	}
 
 	const shape = SHAPE.exec(text);
@@ -46,41 +108,89 @@ export function parseArtifactVersion(raw: string): ArtifactVersion | null {
 	if (parts.some((part) => part.length > 1 && part.startsWith("0"))) {
 		return null;
 	}
-	const kind = classify(shape[2], shape[3]);
-	if (kind === null) {
+	const qualifier = parseQualifier(shape[3]);
+	if (qualifier === null) {
 		return null;
 	}
-	return { raw, components: parts.map(Number), isRelease: kind === "release" };
+	return releaseVersion(parts.map(Number), raw, qualifier);
 }
 
 /**
- * Classify the qualifier as a {@code "release"}, a {@code "prerelease"}, or {@code null} when it is
- * not a recognized qualifier spelling.
+ * Classify the qualifier into the stable Artifact Version order.
  */
-function classify(
-	separator: string | undefined,
-	qualifier: string | undefined,
-): "release" | "prerelease" | null {
+function parseQualifier(qualifier: string | undefined): VersionQualifier | null {
 	if (qualifier === undefined) {
-		return "release";
+		return RELEASE_QUALIFIER;
 	}
-	// A hyphen qualifier follows SemVer: always a pre-release.
-	if (separator === "-") {
-		return "prerelease";
+	const candidate = qualifier.trim();
+	if (candidate === "") {
+		return RELEASE_QUALIFIER;
 	}
-	const upper = qualifier.toUpperCase();
-	if (upper === "RELEASE" || upper === "FINAL") {
-		return "release";
+	if (/\s/.test(candidate)) {
+		return null;
 	}
-	if (
-		/^M\d+$/.test(upper) ||
-		/^RC\d+$/.test(upper) ||
-		upper === "SNAPSHOT" ||
-		upper === "BUILD-SNAPSHOT"
-	) {
-		return "prerelease";
+	const lower = candidate.toLowerCase();
+	if (lower === "release" || lower === "final") {
+		return RELEASE_QUALIFIER;
 	}
-	return null;
+	if (lower === "snapshot" || lower === "build-snapshot") {
+		return SNAPSHOT_QUALIFIER;
+	}
+	if (NUMERIC_QUALIFIER.test(candidate)) {
+		return knownQualifier("", candidate.split("."));
+	}
+
+	const single = SINGLE_SEGMENT_QUALIFIER.exec(candidate);
+	if (single !== null) {
+		return knownQualifier(
+			single[1]!.toLowerCase(),
+			single[3] === "" ? [] : [single[3]!],
+			candidate,
+		);
+	}
+
+	const segments = candidate.replaceAll("-", ".").split(".");
+	if (segments.length >= 2 && !isNumeric(segments[0]!)) {
+		const [type, ...identifiers] = segments;
+		return knownQualifier(type!.toLowerCase(), identifiers, candidate);
+	}
+
+	return { kind: "generic", order: GENERIC_ORDER, genericText: candidate };
+}
+
+function knownQualifier(
+	type: string,
+	identifiers: readonly string[],
+	fallbackText?: string,
+): VersionQualifier {
+	if (type === "sr") {
+		return {
+			kind: "service-release",
+			order: SERVICE_RELEASE_ORDER,
+			identifiers: identifiers.map(identifier),
+		};
+	}
+	const typeOrder = TYPE_ORDER.get(type);
+	if (typeOrder === undefined) {
+		return {
+			kind: "generic",
+			order: GENERIC_ORDER,
+			genericText: fallbackText ?? [type, ...identifiers].join("."),
+		};
+	}
+	return {
+		kind: "pre-release",
+		order: KNOWN_PRE_RELEASE_OFFSET + typeOrder,
+		identifiers: identifiers.map(identifier),
+	};
+}
+
+function identifier(raw: string): Identifier {
+	return isNumeric(raw) ? { raw, numeric: BigInt(raw) } : { raw };
+}
+
+function isNumeric(value: string): boolean {
+	return /^\d+$/.test(value);
 }
 
 /**
@@ -88,6 +198,11 @@ function classify(
  * component and zero the rest. Returns {@code null} when every component is zero (no predecessor).
  */
 export function predecessor(version: ArtifactVersion): ArtifactVersion | null {
+	const qualifier = version.qualifier;
+	if (qualifier.kind === "service-release") {
+		return previousServiceRelease(version, qualifier);
+	}
+
 	const components = [...version.components];
 	let last = components.length - 1;
 	while (last >= 0 && components[last] === 0) {
@@ -97,7 +212,27 @@ export function predecessor(version: ArtifactVersion): ArtifactVersion | null {
 		return null;
 	}
 	components[last] = components[last]! - 1;
-	return { raw: components.join("."), components, isRelease: true };
+	return releaseVersion(components);
+}
+
+function previousServiceRelease(
+	version: ArtifactVersion,
+	qualifier: Extract<VersionQualifier, { kind: "service-release" }>,
+): ArtifactVersion {
+	const counter = qualifier.identifiers[0];
+	if (counter?.numeric !== undefined && counter.numeric > 1n) {
+		const previous = (counter.numeric - 1n).toString();
+		return releaseVersion(
+			version.components,
+			`${version.components.join(".")}.SR${previous}`,
+			{
+				kind: "service-release",
+				order: SERVICE_RELEASE_ORDER,
+				identifiers: [identifier(previous)],
+			},
+		);
+	}
+	return releaseVersion(version.components);
 }
 
 /**
@@ -106,6 +241,9 @@ export function predecessor(version: ArtifactVersion): ArtifactVersion | null {
  * bound; everything else is a patch resolved against a {@link maintenanceBranch}.
  */
 export function isLineOpener(version: ArtifactVersion): boolean {
+	if (version.qualifier.kind === "service-release") {
+		return false;
+	}
 	return (
 		version.components.length < 2 ||
 		version.components[version.components.length - 1] === 0
@@ -119,6 +257,9 @@ export function isLineOpener(version: ArtifactVersion): boolean {
  * must be discovered from the tags. Every other version (patch or minor) resolves arithmetically.
  */
 export function isMajorOpener(version: ArtifactVersion): boolean {
+	if (version.qualifier.kind === "service-release") {
+		return false;
+	}
 	return version.components.slice(1).every((component) => component === 0);
 }
 
@@ -130,17 +271,33 @@ export function maintenanceBranch(version: ArtifactVersion): string {
 }
 
 /**
- * Order two versions by their numeric components, padding the shorter with zeros.
+ * Order two versions by their numeric components and stable Qualifier order.
  */
 export function compareVersions(left: ArtifactVersion, right: ArtifactVersion): number {
-	return compareComponents(left.components, right.components);
+	const componentComparison = compareComponents(left.components, right.components);
+	return componentComparison !== 0
+		? componentComparison
+		: compareQualifiers(left.qualifier, right.qualifier);
 }
 
 /**
- * Whether two versions denote the same numeric release, padding the shorter with zeros.
+ * Whether two versions denote the same Artifact Version, allowing equivalent GA spellings.
  */
 export function sameVersion(left: ArtifactVersion, right: ArtifactVersion): boolean {
-	return compareComponents(left.components, right.components) === 0;
+	return compareVersions(left, right) === 0;
+}
+
+export function releaseVersion(
+	components: readonly number[],
+	raw = components.join("."),
+	qualifier: VersionQualifier = RELEASE_QUALIFIER,
+): ArtifactVersion {
+	return {
+		raw,
+		components: [...components],
+		isRelease: qualifier.kind === "release" || qualifier.kind === "service-release",
+		qualifier,
+	};
 }
 
 function compareComponents(left: readonly number[], right: readonly number[]): number {
@@ -152,4 +309,70 @@ function compareComponents(left: readonly number[], right: readonly number[]): n
 		}
 	}
 	return 0;
+}
+
+function compareQualifiers(left: VersionQualifier, right: VersionQualifier): number {
+	const orderComparison = compareNumber(left.order, right.order);
+	if (orderComparison !== 0) {
+		return orderComparison;
+	}
+	if (left.kind === "generic" && right.kind === "generic") {
+		return compareGenericText(left.genericText, right.genericText);
+	}
+	if ("identifiers" in left && "identifiers" in right) {
+		return compareIdentifiers(left.identifiers, right.identifiers);
+	}
+	return 0;
+}
+
+function compareIdentifiers(
+	left: readonly Identifier[],
+	right: readonly Identifier[],
+): number {
+	const count = Math.min(left.length, right.length);
+	for (let index = 0; index < count; index++) {
+		const comparison = compareIdentifier(left[index]!, right[index]!);
+		if (comparison !== 0) {
+			return comparison;
+		}
+	}
+	return compareNumber(left.length, right.length);
+}
+
+function compareIdentifier(left: Identifier, right: Identifier): number {
+	if (left.numeric !== undefined && right.numeric !== undefined) {
+		return compareBigint(left.numeric, right.numeric);
+	}
+	if (left.numeric !== undefined || right.numeric !== undefined) {
+		return left.numeric !== undefined ? -1 : 1;
+	}
+	return compareText(left.raw, right.raw);
+}
+
+function compareGenericText(left: string, right: string): number {
+	const leftLower = left.toLowerCase();
+	const rightLower = right.toLowerCase();
+	const lowerComparison = compareText(leftLower, rightLower);
+	return lowerComparison !== 0 ? lowerComparison : compareText(left, right);
+}
+
+function compareText(left: string, right: string): number {
+	if (left === right) {
+		return 0;
+	}
+	return left < right ? -1 : 1;
+}
+
+function compareNumber(left: number, right: number): number {
+	if (left === right) {
+		return 0;
+	}
+	return left < right ? -1 : 1;
+}
+
+function compareBigint(left: bigint, right: bigint): number {
+	if (left === right) {
+		return 0;
+	}
+	return left < right ? -1 : 1;
 }

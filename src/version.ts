@@ -24,6 +24,7 @@ import {
 	maintenanceBranch,
 	parseArtifactVersion,
 	predecessor,
+	releaseVersion,
 	sameVersion,
 } from "./artifact-version.js";
 
@@ -130,10 +131,7 @@ async function resolveUpperBound(
 	// A tag for this exact version means it is already released: regenerate against that tag.
 	const tagged =
 		tags.find((version) => version.raw === target.raw) ??
-		tags.find(
-			(version) =>
-				version.isRelease === target.isRelease && sameVersion(version, target),
-		);
+		tags.find((version) => sameVersion(version, target));
 	if (tagged !== undefined) {
 		return tagged.raw;
 	}
@@ -222,11 +220,7 @@ function previousLineOpener(
 	}
 	const components = [...highest.components];
 	components[components.length - 1] = 0;
-	const opener: ArtifactVersion = {
-		raw: components.join("."),
-		components,
-		isRelease: true,
-	};
+	const opener = releaseVersion(components);
 	const match = releases.find((version) => sameVersion(version, opener));
 	return { tag: match?.raw, expected: opener.raw };
 }

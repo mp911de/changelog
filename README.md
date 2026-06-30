@@ -35,7 +35,7 @@ changelog [options] <from>..<to>
 ```
 
 With a single release version, Changelog Tool resolves the previous release tag and the appropriate upper bound automatically.
-Supported versions include SemVer and common Spring-style forms such as `4.0`, `v4.0.0`, `4.0.0.RELEASE`, and `4.0.0.Final`.
+Supported versions include SemVer and common Spring-style forms such as `4.0`, `v4.0.0`, `4.0.0.RELEASE`, `4.0.0.Final`, `4.0.0.RC1`, and `4.0.0.SR1`.
 
 An explicit range may instead be given as two arguments or in Git's two-dot notation.
 The `from` revision is excluded and the `to` revision is included.
