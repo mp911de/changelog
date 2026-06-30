@@ -1,6 +1,6 @@
 {
 	"name": "@mp911de/changelog",
-	"version": "0.1.2",
+	"version": "0.1.1",
 	"description": "Standalone TypeScript CLI that generates GitHub release notes for a commit range.",
 	"keywords": [
 		"github",
@@ -22,7 +22,7 @@
 	},
 	"files": [
 		"dist",
-		"REFERENCE.md",
+		"REFERENCE.adoc",
 		"SECURITY.md"
 	],
 	"scripts": {
@@ -33,7 +33,8 @@
 		"typecheck": "tsc --noEmit",
 		"run": "npx --no-install vite-node --script src/cli.ts",
 		"prettier": "prettier --write .",
-		"prettier:check": "prettier --check ."
+		"prettier:check": "prettier --check .",
+		"release": "release-it"
 	},
 	"dependencies": {
 		"@octokit/plugin-throttling": "11.0.3",
@@ -48,6 +49,7 @@
 		"@types/js-yaml": "4.0.9",
 		"@types/node": "24.13.2",
 		"prettier": "3.8.4",
+		"release-it": "^20.2.1",
 		"tsdown": "0.22.3",
 		"typescript": "5.6.3",
 		"vite-node": "3.2.0",

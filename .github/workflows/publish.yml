@@ -4,9 +4,9 @@ env:
     NPM_VERSION: "11.17.0"
 
 on:
-    push:
-        tags:
-            - "*.*.*"
+  push:
+    tags:
+      - "*.*.*"
 
 permissions:
     contents: read
