@@ -20,6 +20,7 @@ import {
 	type ReferenceCommit,
 	targetKey,
 	type TicketTarget,
+	TicketTargetSet,
 } from "./ticket-references.js";
 
 export interface ChangelogEntry {
@@ -78,17 +79,18 @@ export function resolveTicketReferences(
 	const entries: ChangelogEntry[] = [];
 	const authors: string[] = [];
 	const lookedUp: LookedUpTarget[] = [];
-	const excludedKeys = new Set(excluded.map(targetKey));
-	const excludedTargets: TicketTarget[] = [];
+	const excludedMembership = TicketTargetSet.from(excluded);
+	const excludedTargets = new TicketTargetSet();
 	const flagsByKey = new Map(aggregate.targets.map((t) => [targetKey(t.target), t]));
-	const suppressedChangelogKeys = new Set(
-		[...aggregate.suppressionCandidateKeys].filter((key) => !excludedKeys.has(key)),
+	const suppressedChangelogTargets = TicketTargetSet.from(
+		aggregate.suppressionCandidateTargets.filter(
+			(target) => !excludedMembership.has(target),
+		),
 	);
 
 	for (const { target, changelog, credit } of aggregate.targets) {
-		const key = targetKey(target);
-		if (excludedKeys.has(key)) {
-			excludedTargets.push(target);
+		if (excludedMembership.has(target)) {
+			excludedTargets.add(target);
 			continue;
 		}
 		const facts = lookup.facts.get(targetKey(target));
@@ -96,7 +98,7 @@ export function resolveTicketReferences(
 		if (!facts) {
 			continue;
 		}
-		if (changelog && !suppressedChangelogKeys.has(key)) {
+		if (changelog && !suppressedChangelogTargets.has(target)) {
 			entries.push({
 				target,
 				title: facts.title,
@@ -117,7 +119,7 @@ export function resolveTicketReferences(
 		const failure = toNotFound(aggregate, target);
 		const key = targetKey(target);
 		const flags = flagsByKey.get(key);
-		const changelog = flags?.changelog && !suppressedChangelogKeys.has(key);
+		const changelog = flags?.changelog && !suppressedChangelogTargets.has(target);
 		if (flags?.credit && !changelog) {
 			creditNotFound.push(failure);
 		} else {
@@ -129,7 +131,7 @@ export function resolveTicketReferences(
 		entries,
 		authors,
 		lookedUp,
-		excluded: excludedTargets,
+		excluded: excludedTargets.values(),
 		candidateNotFound,
 		creditNotFound,
 		cached: lookup.cached,

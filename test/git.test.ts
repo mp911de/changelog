@@ -156,7 +156,7 @@ describe("classifyRef", () => {
 
 	it("classifies by git, not by the spelling of the name", async () => {
 		const sha = repo.commit("base");
-		// A tag named like a maintenance branch, and a branch that does not end in .x: the spelling
+		// A tag named like a Service Branch, and a branch that does not end in .x: the spelling
 		// is misleading, so classification must come from git.
 		repo.git("tag", "7.0.x");
 		repo.git("branch", "release/7.0");

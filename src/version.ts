@@ -19,13 +19,19 @@ import { InvalidArgumentError } from "commander";
 import {
 	type ArtifactVersion,
 	compareVersions,
+	isInferablePreRelease,
 	isLineOpener,
 	isMajorOpener,
-	maintenanceBranch,
+	isNonReleaseVersion,
 	parseArtifactVersion,
+	preReleasePredecessorCandidates,
 	predecessor,
 	releaseVersion,
+	requiresExactPreReleasePredecessor,
+	sameNumericComponents,
+	samePreReleaseFamily,
 	sameVersion,
+	serviceBranch,
 } from "./artifact-version.js";
 import type { RefKind } from "./git.js";
 
@@ -82,7 +88,7 @@ export function parseRange(from: string, to: string | undefined): CliRange {
 }
 
 /**
- * A Maintenance Branch resolved against the repository: an unambiguous {@link ref} to feed `git log`
+ * A Service Branch resolved against the repository: an unambiguous {@link ref} to feed `git log`
  * and `git rev-parse`, plus the human {@link label} to show in the header. The two differ for a
  * local branch (`refs/heads/4.0.x` vs `4.0.x`) so a same-named tag cannot shadow the branch in a
  * bare `git log 4.0.4..4.0.x`.
@@ -102,7 +108,7 @@ export interface RepoRefs {
 	tags(): Promise<readonly string[]>;
 
 	/**
-	 * Resolve a Maintenance Branch name to a usable revision (local or remote-tracking), or undefined.
+	 * Resolve a Service Branch name to a usable revision (local or remote-tracking), or undefined.
 	 */
 	resolveBranch(name: string): Promise<ResolvedBranch | undefined>;
 }
@@ -130,7 +136,7 @@ function tagBound(raw: string): ResolvedBound {
 
 /**
  * Resolve the commit range for releasing {@code input}. {@code input} must be a recognized version
- * (callers validate this up front). The upper bound is the matching tag, the Maintenance Branch tip
+ * (callers validate this up front). The upper bound is the matching tag, the Service Branch tip
  * for a patch, or HEAD for a line-opener; the lower bound is the Predecessor, which must exist.
  */
 export async function resolveAutoRange(
@@ -163,15 +169,15 @@ async function resolveUpperBound(
 	if (tagged !== undefined) {
 		return tagBound(tagged.raw);
 	}
-	// A line-opener is developed on the current checkout; a patch comes off its maintenance branch.
+	// A line-opener is developed on the current checkout; a patch comes off its Service Branch.
 	if (isLineOpener(target)) {
 		return { ref: "HEAD", label: "HEAD", kind: "head" };
 	}
-	const branch = maintenanceBranch(target);
+	const branch = serviceBranch(target);
 	const resolved = await repo.resolveBranch(branch);
 	if (resolved === undefined) {
 		throw new Error(
-			`no ${branch} branch found for ${target.raw}; check out the maintenance branch or pass <from> <to>`,
+			`no ${branch} service branch found for ${target.raw}; check out the service branch or pass <from> <to>`,
 		);
 	}
 	return { ref: resolved.ref, label: resolved.label, kind: "branch" };
@@ -190,13 +196,9 @@ function resolveLowerBound(
 ): ResolvedBound {
 	const releases = tags.filter((version) => version.isRelease);
 
-	// Patches and minors resolve to their exact arithmetic Predecessor, which must be tagged: 4.0.4
-	// against 4.0.3, 4.1.0 against 4.0.0, 4.3.0 against 4.2.0 (a Gap when 4.2.0 is missing). Only a
-	// major opener cannot be derived arithmetically, so it discovers the previous major's latest line
-	// from the tags (4.0.0 against 3.5.0).
-	const lower = isMajorOpener(target)
-		? previousLineOpener(target, releases)
-		: exactPredecessor(target, releases);
+	const lower =
+		nonReleaseLowerBound(target, tags, releases) ??
+		releaseLowerBound(target, releases);
 	if (lower.tag !== undefined) {
 		return tagBound(lower.tag);
 	}
@@ -210,6 +212,76 @@ function resolveLowerBound(
 	throw new Error(
 		`could not determine a previous version for ${target.raw}; pass <from> <to> or <from>..<to> explicitly.`,
 	);
+}
+
+function releaseLowerBound(
+	target: ArtifactVersion,
+	releases: readonly ArtifactVersion[],
+): LowerBound {
+	// Patches and minors resolve to their exact arithmetic Predecessor, which must be tagged: 4.0.4
+	// against 4.0.3, 4.1.0 against 4.0.0, 4.3.0 against 4.2.0 (a Gap when 4.2.0 is missing). Only a
+	// major opener cannot be derived arithmetically, so it discovers the previous major's latest line
+	// from the tags (4.0.0 against 3.5.0).
+	return isMajorOpener(target)
+		? previousLineOpener(target, releases)
+		: exactPredecessor(target, releases);
+}
+
+function nonReleaseLowerBound(
+	target: ArtifactVersion,
+	tags: readonly ArtifactVersion[],
+	releases: readonly ArtifactVersion[],
+): LowerBound | undefined {
+	if (!isNonReleaseVersion(target)) {
+		return undefined;
+	}
+	if (!isInferablePreRelease(target)) {
+		return {};
+	}
+	const exact = exactPreReleasePredecessor(target, tags);
+	if (exact.tag !== undefined) {
+		return exact;
+	}
+	if (requiresExactPreReleasePredecessor(target)) {
+		return exact;
+	}
+	const lower = highestLowerPreRelease(target, tags);
+	return lower.tag !== undefined ? lower : releaseLowerBound(target, releases);
+}
+
+function exactPreReleasePredecessor(
+	target: ArtifactVersion,
+	tags: readonly ArtifactVersion[],
+): LowerBound {
+	const candidates = preReleasePredecessorCandidates(target);
+	for (const candidate of candidates) {
+		const match = tags.find((version) => sameVersion(version, candidate));
+		if (match !== undefined) {
+			return { tag: match.raw, expected: candidates[0]?.raw };
+		}
+	}
+	return { expected: candidates[0]?.raw };
+}
+
+function highestLowerPreRelease(
+	target: ArtifactVersion,
+	tags: readonly ArtifactVersion[],
+): LowerBound {
+	let highest: ArtifactVersion | undefined;
+	for (const version of tags) {
+		if (
+			!isInferablePreRelease(version) ||
+			!sameNumericComponents(version, target) ||
+			samePreReleaseFamily(version, target) ||
+			compareVersions(version, target) >= 0
+		) {
+			continue;
+		}
+		if (highest === undefined || compareVersions(version, highest) > 0) {
+			highest = version;
+		}
+	}
+	return { tag: highest?.raw };
 }
 
 function exactPredecessor(

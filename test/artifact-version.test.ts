@@ -20,10 +20,10 @@ import {
 	compareVersions,
 	isMajorOpener,
 	isLineOpener,
-	maintenanceBranch,
 	parseArtifactVersion,
 	predecessor,
 	sameVersion,
+	serviceBranch,
 } from "../src/artifact-version.js";
 
 function parse(raw: string) {
@@ -134,10 +134,10 @@ describe("upper-bound shape", () => {
 		expect(isMajorOpener(parse("4.0.0.SR1"))).toBe(false);
 	});
 
-	it("derives the maintenance branch by replacing the last component with x", () => {
-		expect(maintenanceBranch(parse("4.0.7"))).toBe("4.0.x");
-		expect(maintenanceBranch(parse("1.2.3.4"))).toBe("1.2.3.x");
-		expect(maintenanceBranch(parse("4.1"))).toBe("4.x");
+	it("derives the service branch by replacing the last component with x", () => {
+		expect(serviceBranch(parse("4.0.7"))).toBe("4.0.x");
+		expect(serviceBranch(parse("1.2.3.4"))).toBe("1.2.3.x");
+		expect(serviceBranch(parse("4.1"))).toBe("4.x");
 	});
 });
 

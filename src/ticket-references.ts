@@ -58,9 +58,7 @@ export interface ReferenceCommit {
 }
 
 /**
- * A distinct GitHub issue or pull request, identified by repository plus ticket number. Multiple
- * occurrences across commits resolve to one Ticket Target, which crosses the lookup seam once per
- * run.
+ * A distinct GitHub issue or pull request, identified by repository plus ticket number.
  */
 export interface TicketTarget {
 	readonly id: string;
@@ -82,6 +80,48 @@ export function repositoryKey(repository: Repository, id: string): string {
  */
 export function targetKey(target: TicketTarget): string {
 	return target.repository ? repositoryKey(target.repository, target.id) : target.id;
+}
+
+/**
+ * A value collection for Ticket Targets keyed by their domain identity, preserving first-seen order.
+ */
+export class TicketTargetSet {
+	private readonly targets = new Map<string, TicketTarget>();
+
+	static from(targets: Iterable<TicketTarget>): TicketTargetSet {
+		return new TicketTargetSet(targets);
+	}
+
+	constructor(targets: Iterable<TicketTarget> = []) {
+		for (const target of targets) {
+			this.add(target);
+		}
+	}
+
+	get size(): number {
+		return this.targets.size;
+	}
+
+	add(target: TicketTarget): boolean {
+		const key = targetKey(target);
+		if (this.targets.has(key)) {
+			return false;
+		}
+		this.targets.set(key, target);
+		return true;
+	}
+
+	has(target: TicketTarget): boolean {
+		return this.targets.has(targetKey(target));
+	}
+
+	delete(target: TicketTarget): boolean {
+		return this.targets.delete(targetKey(target));
+	}
+
+	values(): TicketTarget[] {
+		return [...this.targets.values()];
+	}
 }
 
 export interface CommitReferences {
@@ -124,11 +164,11 @@ export interface Aggregate {
 	readonly targets: readonly LookupTarget[];
 
 	/**
-	 * Ticket Target keys that can suppress changelog entry roles after followReferences has removed
+	 * Ticket Targets that can suppress changelog entry roles after followReferences has removed
 	 * excluded targets. They originate from Original Pull Request credit for commits with a Closing or
 	 * See reference.
 	 */
-	readonly suppressionCandidateKeys: ReadonlySet<string>;
+	readonly suppressionCandidateTargets: readonly TicketTarget[];
 
 	/**
 	 * The oldest commit that produced an occurrence of each looked-up target, keyed by
@@ -154,7 +194,7 @@ export function aggregateReferences(
 	// so a target can accumulate both purposes.
 	const changelog = new Map<string, TicketTarget>();
 	const credit = new Map<string, TicketTarget>();
-	const suppressionCandidateKeys = new Set<string>();
+	const suppressionCandidateTargets = new TicketTargetSet();
 
 	const noteTarget = (target: TicketTarget, commit: ReferenceCommit): void => {
 		const key = targetKey(target);
@@ -169,10 +209,10 @@ export function aggregateReferences(
 		const tier = highestCandidateTier(occurrences);
 		const pullRequestsAreCreditOnly = tier === "Qualified" || tier === "See";
 
-		const candidates = dedupeByKey();
-		const credits = dedupeByKey();
-		const demoted = dedupeByKey();
-		const related = dedupeByKey();
+		const candidates = new TicketTargetSet();
+		const credits = new TicketTargetSet();
+		const demoted = new TicketTargetSet();
+		const related = new TicketTargetSet();
 		for (const occurrence of occurrences) {
 			const target = toTarget(occurrence, currentRepository);
 			// A PullRequest occurrence is a Credit Reference independently of candidate selection.
@@ -181,7 +221,7 @@ export function aggregateReferences(
 				credit.set(targetKey(target), target);
 				credits.add(target);
 				if (pullRequestsAreCreditOnly) {
-					suppressionCandidateKeys.add(targetKey(target));
+					suppressionCandidateTargets.add(target);
 				}
 			}
 			if (occurrence.qualifier === tier) {
@@ -199,13 +239,14 @@ export function aggregateReferences(
 			}
 			demoted.add(target);
 		}
+		const candidateTargets = candidates.values();
 		return {
 			commit,
-			lead: candidates.items[0],
-			candidates: candidates.items,
-			credits: credits.items,
-			demoted: demoted.items,
-			related: related.items,
+			lead: candidateTargets[0],
+			candidates: candidateTargets,
+			credits: credits.values(),
+			demoted: demoted.values(),
+			related: related.values(),
 		};
 	});
 
@@ -215,7 +256,7 @@ export function aggregateReferences(
 	return {
 		commits,
 		targets: buildLookupTargets(changelog, credit),
-		suppressionCandidateKeys,
+		suppressionCandidateTargets: suppressionCandidateTargets.values(),
 		provenance,
 	};
 }
@@ -235,22 +276,6 @@ function buildLookupTargets(
 		changelog: changelog.has(key),
 		credit: credit.has(key),
 	}));
-}
-
-function dedupeByKey() {
-	const seen = new Set<string>();
-	const items: TicketTarget[] = [];
-	return {
-		items,
-		add(target: TicketTarget): void {
-			const key = targetKey(target);
-			if (seen.has(key)) {
-				return;
-			}
-			seen.add(key);
-			items.push(target);
-		},
-	};
 }
 
 // The Reference Qualifiers with their strength rank (higher is stronger) and candidate eligibility:

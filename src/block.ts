@@ -190,7 +190,7 @@ export function headerBoxLines(
 
 	if (!color) {
 		return [
-			`>_ ${repoName} › changelog (v${version} · ${commitSha})`,
+			`>_ ${repoName} › changelog (v${version}/${commitSha})`,
 			...labels.map(([label, value]) => `${label} ${raw(value)}`),
 		];
 	}
@@ -201,11 +201,11 @@ export function headerBoxLines(
 		{ text: repoName, style: "bold", link: fields.repository.url },
 		{ text: " › ", style: "mauve", bold: true },
 		{ text: "changelog", style: "bold" },
-		{ text: ` (v${version} · `, style: "faint" },
+		{ text: ` (v${version}/`, style: "faint" },
 		{ text: commitSha, style: "faint", link: fields.build.url },
 		{ text: ")", style: "faint" },
 	];
-	const titleRaw = `>_ ${repoName} › changelog (v${version} · ${commitSha})`;
+	const titleRaw = `>_ ${repoName} › changelog (v${version}/${commitSha})`;
 
 	const rows: Array<{ rendered: string; width: number }> = [
 		{ rendered: renderInline(palette, titleCells), width: palette.width(titleRaw) },

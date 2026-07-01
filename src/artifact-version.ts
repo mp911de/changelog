@@ -16,7 +16,7 @@
 
 /**
  * A tag or release target parsed from any supported spelling. {@link components} are the numeric
- * parts as written (unpadded) so a Maintenance Branch and Predecessor can be derived; comparison
+ * parts as written (unpadded) so a Service Branch and Predecessor can be derived; comparison
  * pads with zeros so `4`, `4.0` and `4.0.0` are equal before applying the stable Qualifier order.
  */
 export interface ArtifactVersion {
@@ -51,11 +51,53 @@ const TYPE_ORDER = new Map<string, number>([
 	["rc", 13],
 	["cr", 14],
 ]);
+const INFERABLE_PRE_RELEASE_TYPES = new Set([
+	"alpha",
+	"a",
+	"beta",
+	"b",
+	"pre",
+	"preview",
+	"m",
+	"rc",
+	"cr",
+]);
+const NON_NUMERIC_INFERABLE_PRE_RELEASE_TYPES = new Set(["alpha", "a", "beta", "b"]);
+const PRE_RELEASE_FAMILY = new Map<string, string>([
+	["alpha", "alpha"],
+	["a", "alpha"],
+	["beta", "beta"],
+	["b", "beta"],
+	["pre", "pre"],
+	["preview", "preview"],
+	["m", "m"],
+	["rc", "rc"],
+	["cr", "rc"],
+]);
+const PRE_RELEASE_ALIASES = new Map<string, readonly string[]>([
+	["alpha", ["a"]],
+	["a", ["alpha"]],
+	["beta", ["b"]],
+	["b", ["beta"]],
+	["rc", ["cr"]],
+	["cr", ["rc"]],
+]);
+const PRE_RELEASE_DISPLAY = new Map<string, string>([
+	["m", "M"],
+	["rc", "RC"],
+	["cr", "CR"],
+]);
 
 type VersionQualifier =
 	| {
-			readonly kind: "snapshot" | "pre-release" | "release";
+			readonly kind: "snapshot" | "release";
 			readonly order: number;
+			readonly identifiers: readonly Identifier[];
+	  }
+	| {
+			readonly kind: "pre-release";
+			readonly order: number;
+			readonly type: string;
 			readonly identifiers: readonly Identifier[];
 	  }
 	| {
@@ -181,6 +223,7 @@ function knownQualifier(
 	return {
 		kind: "pre-release",
 		order: KNOWN_PRE_RELEASE_OFFSET + typeOrder,
+		type,
 		identifiers: identifiers.map(identifier),
 	};
 }
@@ -236,9 +279,75 @@ function previousServiceRelease(
 }
 
 /**
+ * Whether {@code version} has a qualifier that orders before GA.
+ */
+export function isNonReleaseVersion(version: ArtifactVersion): boolean {
+	return !version.isRelease;
+}
+
+/**
+ * Whether {@code version} has a known qualifier whose predecessor can be inferred safely.
+ */
+export function isInferablePreRelease(version: ArtifactVersion): boolean {
+	return inferablePreRelease(version) !== undefined;
+}
+
+/**
+ * Candidate same-family predecessors for a numbered pre-release target, ordered by preference:
+ * same qualifier spelling first, then semantic aliases.
+ */
+export function preReleasePredecessorCandidates(
+	target: ArtifactVersion,
+): readonly ArtifactVersion[] {
+	const preRelease = inferablePreRelease(target);
+	const previous = previousPreReleaseIdentifiers(preRelease?.identifiers);
+	if (preRelease === undefined || previous === undefined) {
+		return [];
+	}
+	return [preRelease.type, ...(PRE_RELEASE_ALIASES.get(preRelease.type) ?? [])].map(
+		(type) => preReleaseVersion(target.components, type, previous),
+	);
+}
+
+/**
+ * Whether a numbered pre-release target must fail when its same-family predecessor is absent.
+ */
+export function requiresExactPreReleasePredecessor(target: ArtifactVersion): boolean {
+	const preRelease = inferablePreRelease(target);
+	const last = preRelease?.identifiers.at(-1)?.numeric;
+	return last !== undefined && last > 1n;
+}
+
+/**
+ * Whether two versions have equivalent numeric components, ignoring qualifiers and spelling.
+ */
+export function sameNumericComponents(
+	left: ArtifactVersion,
+	right: ArtifactVersion,
+): boolean {
+	return compareComponents(left.components, right.components) === 0;
+}
+
+/**
+ * Whether two inferable pre-releases belong to the same semantic qualifier family.
+ */
+export function samePreReleaseFamily(
+	left: ArtifactVersion,
+	right: ArtifactVersion,
+): boolean {
+	const leftPreRelease = inferablePreRelease(left);
+	const rightPreRelease = inferablePreRelease(right);
+	return (
+		leftPreRelease !== undefined &&
+		rightPreRelease !== undefined &&
+		leftPreRelease.family === rightPreRelease.family
+	);
+}
+
+/**
  * Whether {@code version} opens a Release Line rather than advancing one: a trailing-zero last
  * component (`4.1.0`, `4.0`) or a single component (`4`). Line-openers take HEAD as their upper
- * bound; everything else is a patch resolved against a {@link maintenanceBranch}.
+ * bound; everything else is a patch resolved against a Service Branch.
  */
 export function isLineOpener(version: ArtifactVersion): boolean {
 	if (version.qualifier.kind === "service-release") {
@@ -264,9 +373,9 @@ export function isMajorOpener(version: ArtifactVersion): boolean {
 }
 
 /**
- * The maintenance branch name for a patch {@code version}: its last component replaced by `x`.
+ * The Service Branch name for a patch {@code version}: its last component replaced by `x`.
  */
-export function maintenanceBranch(version: ArtifactVersion): string {
+export function serviceBranch(version: ArtifactVersion): string {
 	return [...version.components.slice(0, -1), "x"].join(".");
 }
 
@@ -298,6 +407,66 @@ export function releaseVersion(
 		isRelease: qualifier.kind === "release" || qualifier.kind === "service-release",
 		qualifier,
 	};
+}
+
+interface InferablePreRelease {
+	readonly type: string;
+	readonly family: string;
+	readonly identifiers: readonly Identifier[];
+}
+
+function inferablePreRelease(version: ArtifactVersion): InferablePreRelease | undefined {
+	const qualifier = version.qualifier;
+	if (
+		qualifier.kind !== "pre-release" ||
+		!INFERABLE_PRE_RELEASE_TYPES.has(qualifier.type)
+	) {
+		return undefined;
+	}
+	if (
+		qualifier.identifiers.length === 0 &&
+		!NON_NUMERIC_INFERABLE_PRE_RELEASE_TYPES.has(qualifier.type)
+	) {
+		return undefined;
+	}
+	if (
+		qualifier.identifiers.length > 0 &&
+		qualifier.identifiers.some((value) => value.numeric === undefined)
+	) {
+		return undefined;
+	}
+	const family = PRE_RELEASE_FAMILY.get(qualifier.type);
+	if (family === undefined) {
+		return undefined;
+	}
+	return { type: qualifier.type, family, identifiers: qualifier.identifiers };
+}
+
+function previousPreReleaseIdentifiers(
+	identifiers: readonly Identifier[] | undefined,
+): readonly string[] | undefined {
+	const last = identifiers?.at(-1)?.numeric;
+	if (identifiers === undefined || last === undefined || last < 1n) {
+		return undefined;
+	}
+	return [
+		...identifiers.slice(0, -1).map((value) => value.raw),
+		(last - 1n).toString(),
+	];
+}
+
+function preReleaseVersion(
+	components: readonly number[],
+	type: string,
+	identifiers: readonly string[],
+): ArtifactVersion {
+	const display = PRE_RELEASE_DISPLAY.get(type) ?? type;
+	const suffix =
+		identifiers.length === 0
+			? display
+			: `${display}${identifiers.length === 1 ? identifiers[0] : `.${identifiers.join(".")}`}`;
+	const raw = `${components.join(".")}-${suffix}`;
+	return releaseVersion(components, raw, knownQualifier(type, identifiers, suffix));
 }
 
 function compareComponents(left: readonly number[], right: readonly number[]): number {

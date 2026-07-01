@@ -110,7 +110,7 @@ export async function listTags(cwd: string, trace?: Trace): Promise<string[]> {
 }
 
 /**
- * Resolve a Maintenance Branch name to a usable revision: a local branch takes precedence,
+ * Resolve a Service Branch name to a usable revision: a local branch takes precedence,
  * otherwise a remote-tracking branch (`origin` first, then any other remote). Returns the
  * fully-qualified {@code ref} to use as the upper bound paired with its display {@code label}, or
  * undefined when no such branch exists. The ref is fully qualified (`refs/heads/...`,
@@ -141,7 +141,7 @@ export async function resolveBranch(
 /**
  * Classify a revision so the renderer can link it to the right GitHub page. Checks git rather than
  * the spelling of the name: a tag named like a branch (for example {@code 7.0.x}) is still a tag,
- * and a maintenance branch that does not end in {@code .x} is still a branch. Covers the resolved
+ * and a Service Branch that does not end in {@code .x} is still a branch. Covers the resolved
  * remote-tracking form ({@code origin/4.0.x}) via {@code refs/remotes}. Anything that is neither a
  * tag nor a branch (a sha) is treated as a commit.
  */

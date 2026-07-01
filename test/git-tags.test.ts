@@ -92,21 +92,21 @@ describe("version resolution against a real repository", () => {
 		]);
 	});
 
-	it("resolves a maintenance branch from a remote-tracking ref when no local branch exists", async () => {
+	it("resolves a service branch from a remote-tracking ref when no local branch exists", async () => {
 		expect(await resolveBranch("4.0.x", repo)).toEqual({
 			ref: "refs/remotes/origin/4.0.x",
 			label: "origin/4.0.x",
 		});
 	});
 
-	it("prefers a local maintenance branch and returns its fully-qualified ref", async () => {
+	it("prefers a local service branch and returns its fully-qualified ref", async () => {
 		expect(await resolveBranch("5.0.x", repo)).toEqual({
 			ref: "refs/heads/5.0.x",
 			label: "5.0.x",
 		});
 	});
 
-	it("returns undefined for an unknown maintenance branch", async () => {
+	it("returns undefined for an unknown service branch", async () => {
 		expect(await resolveBranch("9.9.x", repo)).toBeUndefined();
 	});
 

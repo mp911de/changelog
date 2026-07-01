@@ -193,7 +193,7 @@ describe("header box", () => {
 		createRenderer(stream, { capabilities: plain }).headerBox(fields);
 		expect(get()).not.toContain(ESC);
 		expect(get()).not.toContain("╭");
-		expect(get()).toContain(">_ widgets › changelog (v0.1.0 · abc1234)");
+		expect(get()).toContain(">_ widgets › changelog (v0.1.0/abc1234)");
 		expect(get()).toContain("repository: octo/widgets");
 		expect(get()).toContain("range: 4.0.0..HEAD (abc1234)");
 		expect(get()).toContain("output: release-notes.md");

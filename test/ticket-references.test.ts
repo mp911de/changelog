@@ -23,6 +23,7 @@ import {
 	type ReferenceOccurrence,
 	referenceOccurrence,
 	type TicketTarget,
+	TicketTargetSet,
 	targetKey,
 } from "../src/ticket-references.js";
 
@@ -51,6 +52,42 @@ function changelogTargets(aggregate: Aggregate): readonly TicketTarget[] {
 		.filter((flagged) => flagged.changelog)
 		.map((flagged) => flagged.target);
 }
+
+describe("TicketTargetSet", () => {
+	it("deduplicates by Ticket Target identity while preserving first-seen order", () => {
+		const targets = TicketTargetSet.from([
+			{ id: "#1" },
+			{ id: "#1" },
+			{ id: "#1", repository: { owner: "acme", repo: "gizmos" } },
+			{ id: "#2" },
+		]);
+
+		expect(targets.add({ id: "#2" })).toBe(false);
+		expect(targets.add({ id: "#3" })).toBe(true);
+		expect(targets.values().map(targetKey)).toEqual([
+			"#1",
+			"acme/gizmos#1",
+			"#2",
+			"#3",
+		]);
+		expect(targets.size).toBe(4);
+	});
+
+	it("checks and deletes by Ticket Target identity instead of object identity", () => {
+		const targets = TicketTargetSet.from([
+			{ id: "#1", repository: { owner: "acme", repo: "gizmos" } },
+		]);
+		const sameTarget = {
+			id: "#1",
+			repository: { owner: "acme", repo: "gizmos" },
+		};
+
+		expect(targets.has(sameTarget)).toBe(true);
+		expect(targets.delete(sameTarget)).toBe(true);
+		expect(targets.has(sameTarget)).toBe(false);
+		expect(targets.delete(sameTarget)).toBe(false);
+	});
+});
 
 describe("aggregated Ticket References (Simple path)", () => {
 	it("turns a single Simple occurrence into one Changelog Candidate that is the Lead", () => {

@@ -39,6 +39,7 @@ import {
 	type AggregatedCommit,
 	targetKey,
 	type TicketTarget,
+	TicketTargetSet,
 } from "./ticket-references.js";
 
 function plural(count: number, singular: string, plural = `${singular}s`): string {
@@ -143,18 +144,17 @@ function referenceItem(
 
 function commitRows(commits: readonly ScannedRow[], repo: Repository): CommitRow[] {
 	return commits.map((commit) => {
-		const seen = new Set<string>();
+		const seen = new TicketTargetSet();
 		if (commit.lead) {
-			seen.add(targetKey(commit.lead));
+			seen.add(commit.lead);
 		}
 		const references: ReferenceItem[] = [];
 		const addRole = (targets: readonly TicketTarget[], emphasis: Emphasis) => {
 			for (const target of targets) {
-				const key = targetKey(target);
-				if (seen.has(key)) {
+				if (seen.has(target)) {
 					continue;
 				}
-				seen.add(key);
+				seen.add(target);
 				references.push(referenceItem(target, emphasis, repo));
 			}
 		};
@@ -403,18 +403,18 @@ function isMissing(commit: AggregatedCommit): boolean {
 }
 
 function scannedSummary(aggregate: Aggregate): ScannedSummary {
-	const unique = new Set<string>();
-	const pullRequest = new Set<string>();
+	const unique = new TicketTargetSet();
+	const pullRequest = new TicketTargetSet();
 	let missing = 0;
 	for (const commit of aggregate.commits) {
 		if (isMissing(commit)) {
 			missing += 1;
 		}
 		for (const candidate of commitTargets(commit)) {
-			unique.add(targetKey(candidate));
+			unique.add(candidate);
 		}
 		for (const credit of commit.credits) {
-			pullRequest.add(targetKey(credit));
+			pullRequest.add(credit);
 		}
 	}
 	return { missing, uniqueTargets: unique.size, pullRequestTargets: pullRequest.size };

@@ -26,7 +26,7 @@ function repo(overrides: Partial<RepoRefs>): RepoRefs {
 	};
 }
 
-// A maintenance-branch stub for "4.0.x" that returns the same spelling as ref and label; the
+// A service-branch stub for "4.0.x" that returns the same spelling as ref and label; the
 // fully-qualified ref the real Git adapter produces is exercised in git-tags.test.ts.
 function branch(label: string): RepoRefs["resolveBranch"] {
 	return async (name) => (name === "4.0.x" ? { ref: label, label } : undefined);
@@ -39,7 +39,7 @@ function range(resolved: ResolvedRange): { from: string; to: string } {
 }
 
 describe("resolveAutoRange", () => {
-	it("resolves a patch to its predecessor and the maintenance branch tip", async () => {
+	it("resolves a patch to its predecessor and the service branch tip", async () => {
 		const refs = repo({
 			tags: async () => ["4.0.5", "4.0.6"],
 			resolveBranch: branch("origin/4.0.x"),
@@ -133,6 +133,109 @@ describe("resolveAutoRange", () => {
 		});
 	});
 
+	it("resolves inferable pre-releases from same-version pre-release predecessors", async () => {
+		const refs = repo({
+			tags: async () => ["4.0.0", "4.1.0-M0", "4.1.0-M1", "4.1.0-M2", "4.1.0-RC1"],
+		});
+		const cases: readonly [string, string, string][] = [
+			["4.1.0-M1", "4.1.0-M0", "4.1.0-M1"],
+			["4.1.0-M2", "4.1.0-M1", "4.1.0-M2"],
+			["4.1.0-RC1", "4.1.0-M2", "4.1.0-RC1"],
+			["4.1.0-RC2", "4.1.0-RC1", "HEAD"],
+		];
+
+		for (const [target, from, to] of cases) {
+			expect(range(await resolveAutoRange(target, refs))).toEqual({ from, to });
+		}
+	});
+
+	it("enters inferable pre-release families from lower families or the release predecessor", async () => {
+		const refs = repo({
+			tags: async () => ["4.0.0", "4.1.0-alpha", "4.1.0-alpha1"],
+		});
+
+		expect(
+			range(
+				await resolveAutoRange("4.1.0-M1", repo({ tags: async () => ["4.0.0"] })),
+			),
+		).toEqual({
+			from: "4.0.0",
+			to: "HEAD",
+		});
+		expect(range(await resolveAutoRange("4.1.0-alpha", refs))).toEqual({
+			from: "4.0.0",
+			to: "4.1.0-alpha",
+		});
+		expect(range(await resolveAutoRange("4.1.0-beta", refs))).toEqual({
+			from: "4.1.0-alpha1",
+			to: "HEAD",
+		});
+		expect(range(await resolveAutoRange("4.1.0-beta1", refs))).toEqual({
+			from: "4.1.0-alpha1",
+			to: "HEAD",
+		});
+	});
+
+	it("prefers same qualifier spelling before aliases for pre-release predecessors", async () => {
+		const refs = repo({
+			tags: async () => [
+				"4.0.0",
+				"4.1.0-alpha1",
+				"4.1.0-a1",
+				"4.1.0-RC1",
+				"4.1.0-CR1",
+			],
+		});
+
+		expect(range(await resolveAutoRange("4.1.0-alpha2", refs))).toEqual({
+			from: "4.1.0-alpha1",
+			to: "HEAD",
+		});
+		expect(range(await resolveAutoRange("4.1.0-a2", refs))).toEqual({
+			from: "4.1.0-a1",
+			to: "HEAD",
+		});
+		expect(range(await resolveAutoRange("4.1.0-RC2", refs))).toEqual({
+			from: "4.1.0-RC1",
+			to: "HEAD",
+		});
+		expect(range(await resolveAutoRange("4.1.0-CR2", refs))).toEqual({
+			from: "4.1.0-CR1",
+			to: "HEAD",
+		});
+	});
+
+	it("fails with a gap when a numbered pre-release predecessor is missing", async () => {
+		await expect(
+			resolveAutoRange(
+				"4.1.0-M3",
+				repo({ tags: async () => ["4.0.0", "4.1.0-M1"] }),
+			),
+		).rejects.toThrow(/Cannot find tag 4\.1\.0-M2/);
+		await expect(
+			resolveAutoRange(
+				"4.1.0-RC2",
+				repo({ tags: async () => ["4.0.0", "4.1.0-M2"] }),
+			),
+		).rejects.toThrow(/Cannot find tag 4\.1\.0-RC1/);
+	});
+
+	it("requires explicit bounds for non-inferable pre-release targets", async () => {
+		const refs = repo({ tags: async () => ["4.0.0"] });
+
+		for (const target of [
+			"4.1.0-dev",
+			"4.1.0-nightly",
+			"4.1.0-SNAPSHOT",
+			"4.1.0-1",
+			"4.1.0-foo",
+		]) {
+			await expect(resolveAutoRange(target, refs)).rejects.toThrow(
+				/Cannot find tag for the previous version/,
+			);
+		}
+	});
+
 	it("fails with a gap when the predecessor is missing but releases order below", async () => {
 		const refs = repo({
 			tags: async () => ["4.0.4", "4.0.5"],
@@ -152,14 +255,14 @@ describe("resolveAutoRange", () => {
 		);
 	});
 
-	it("fails when a patch has no resolvable maintenance branch", async () => {
+	it("fails when a patch has no resolvable service branch", async () => {
 		const refs = repo({
 			tags: async () => ["4.0.6"],
 			resolveBranch: async () => undefined,
 		});
 
 		await expect(resolveAutoRange("4.0.7", refs)).rejects.toThrow(
-			/no 4\.0\.x branch found/,
+			/no 4\.0\.x service branch found/,
 		);
 	});
 
@@ -172,7 +275,7 @@ describe("resolveAutoRange", () => {
 		});
 	});
 
-	it("returns the v-prefixed tag and the bare maintenance branch for a patch", async () => {
+	it("returns the v-prefixed tag and the bare service branch for a patch", async () => {
 		const refs = repo({
 			tags: async () => ["v4.0.5", "v4.0.6"],
 			resolveBranch: branch("origin/4.0.x"),
@@ -201,7 +304,7 @@ describe("resolveAutoRange", () => {
 		expect(range(bare)).toEqual({ from: "4.0.0", to: "HEAD" });
 	});
 
-	it("resolves a first service release from GA to the maintenance branch tip", async () => {
+	it("resolves a first service release from GA to the service branch tip", async () => {
 		const refs = repo({
 			tags: async () => ["4.0.0"],
 			resolveBranch: branch("origin/4.0.x"),
