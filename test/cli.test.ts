@@ -677,6 +677,78 @@ describe("main run-level", () => {
 		expect(document).toContain("## :heart: Contributors\n- @contrib\n");
 	});
 
+	it("suppresses an Original pull request entry that is credited by another issue entry in the run", async () => {
+		const from = repo.commit("base");
+		repo.commit("Backport pull request\n\nOriginal pull request: #20");
+		repo.commit("Backport fix\n\nCloses #10\n\nOriginal pull request: #20");
+
+		const adapter = mockGitHubAdapter({
+			"#10": resolvedTicket("Backport fix", ["bug"]),
+			"#20": resolvedTicket("The pull request", ["bug"], false, "contrib"),
+		});
+		const { out, runtime } = captureRuntime(repo.dir, adapter);
+		const code = await main(
+			["node", "changelog", "--output", "-", "--quiet", `${from}..HEAD`],
+			runtime,
+		);
+
+		expect(code).toBe(0);
+		const document = out.join("");
+
+		expect(document).toContain("- Backport fix. [#10]");
+		expect(document).not.toContain("The pull request");
+		expect(document).toContain("## :heart: Contributors\n- @contrib\n");
+	});
+
+	it("does not list a suppressed Original pull request entry under Other Changes", async () => {
+		const from = repo.commit("base");
+		repo.commit("Backport pull request\n\nOriginal pull request: #20");
+		repo.commit("Backport fix\n\nCloses #10\n\nOriginal pull request: #20");
+
+		const adapter = mockGitHubAdapter({
+			"#10": resolvedTicket("Backport fix", ["bug"]),
+			"#20": resolvedTicket("The pull request", ["misc"], false, "contrib"),
+		});
+		const { out, runtime } = captureRuntime(repo.dir, adapter);
+		const code = await main(
+			["node", "changelog", "--output", "-", "--quiet", "--all", `${from}..HEAD`],
+			runtime,
+		);
+
+		expect(code).toBe(0);
+		const document = out.join("");
+
+		expect(document).toContain("- Backport fix. [#10]");
+		expect(document).not.toContain(":gear: Other Changes");
+		expect(document).not.toContain("The pull request");
+		expect(document).toContain("## :heart: Contributors\n- @contrib\n");
+	});
+
+	it("suppresses only the matching Original pull request ticket identity", async () => {
+		const from = repo.commit("base");
+		repo.commit("Backport fix\n\nCloses #10\n\nOriginal pull request: #20");
+		repo.commit("Follow-up\n\nCloses #20\n\nCloses #30");
+
+		const adapter = mockGitHubAdapter({
+			"#10": resolvedTicket("Backport fix", ["bug"]),
+			"#20": resolvedTicket("The pull request", ["bug"], false, "contrib"),
+			"#30": resolvedTicket("Follow-up issue", ["bug"]),
+		});
+		const { out, runtime } = captureRuntime(repo.dir, adapter);
+		const code = await main(
+			["node", "changelog", "--output", "-", "--quiet", `${from}..HEAD`],
+			runtime,
+		);
+
+		expect(code).toBe(0);
+		const document = out.join("");
+
+		expect(document).toContain("- Backport fix. [#10]");
+		expect(document).not.toContain("The pull request");
+		expect(document).toContain("- Follow-up issue. [#30]");
+		expect(document).toContain("## :heart: Contributors\n- @contrib\n");
+	});
+
 	it("does not fall back to an Original pull request entry when the See issue is missing", async () => {
 		const from = repo.commit("base");
 		repo.commit("Backport follow-up\n\nSee #10\n\nOriginal pull request: #20");

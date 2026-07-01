@@ -149,8 +149,8 @@ The kind decides what each reference contributes to the notes.
 When more than one reference could supply the changelog entry, the strongest kind present wins, in this order:
 
 . A closing reference (`Closes #1234`).
-. An original pull request reference (`Original pull request: #1234`).
 . A `See` reference (`See #1234`).
+. An original pull request reference (`Original pull request: #1234`).
 . A plain reference (`#1234`).
 
 When a closing reference or `See` reference appears together with one or more original pull request references, the original pull request references are credit-only.
@@ -164,6 +164,13 @@ This precedence applies only to the changelog entry.
 Contributor credit is independent: an `Original pull request:` reference always credits its author, even when a closing reference supplies the entry.
 
 NOTE: An `Original pull request:` reference also supplies the changelog entry when the message contains no closing or `See` reference, so a pull request that records no issue context explicitly still appears in the notes.
+
+Across the whole generated run, a pull request already recorded as an original pull request for an issue or `See` entry is not repeated as its own changelog entry.
+This suppression is based on the ticket identity in the current run, not on commit order: if `Original pull request: #1234` is paired with a closing or `See` reference in one commit, any other changelog-entry reference to `#1234` in the same run is omitted.
+Suppression is per ticket identity, not per commit; other changelog-entry references from the same commit still contribute entries.
+An original pull request reference excluded by follow-reference policy does not create suppression.
+A followed original pull request reference creates suppression even when GitHub cannot resolve it; the unresolved pull request cannot produce a changelog entry either.
+Suppressed changelog entry references are removed before section placement, so they do not appear under `--all` or in any configured section.
 
 == How Changes become changelog entries
 

@@ -303,6 +303,41 @@ describe("runPipeline", () => {
 		).toEqual(["#500"]);
 	});
 
+	it("reports an unresolved suppressed Original pull request as a credit-only not-found failure", async () => {
+		const from = repo.commit("base");
+
+		repo.commit("Original contribution\n\nOriginal pull request: #500");
+		repo.commit("Backport\n\nCloses #404\n\nOriginal pull request: #500");
+
+		const progress = recordingProgress();
+		const document = await runPipeline({
+			from,
+			to: "HEAD",
+			cwd: repo.dir,
+			repository: { owner: "octo", repo: "widgets" },
+			config,
+			all: false,
+			progress,
+			lookup: mockLookup({
+				"#404": ticket("#404", "Backport fix", ["bug"]),
+			}),
+		});
+
+		expect(document).toContain("- Backport fix. [#404]");
+		const lookedUp = progress.events.find(
+			(event) => event.type === "looking-up-complete",
+		);
+		if (lookedUp?.type !== "looking-up-complete") {
+			throw new Error("missing looking-up-complete event");
+		}
+		expect(
+			lookedUp.resolved.candidateNotFound.map((failure) => failure.target.id),
+		).toEqual([]);
+		expect(
+			lookedUp.resolved.creditNotFound.map((failure) => failure.target.id),
+		).toEqual(["#500"]);
+	});
+
 	it("does not promote a demoted lower tier when the selected candidate fails to resolve", async () => {
 		const from = repo.commit("base");
 

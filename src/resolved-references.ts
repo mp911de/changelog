@@ -41,8 +41,8 @@ export interface LookedUpTarget {
 
 /**
  * The immutable join of an {@link Aggregate} with GitHub lookup facts. It owns resolved Changelog
- * Entries, ordered author facts for Contributor Credit, the distinct candidate and credit-only
- * not-found failures, and cache provenance.
+ * Entries, ordered author facts for Contributor Credit, suppressed Changelog Entry References, the
+ * distinct candidate and credit-only not-found failures, and cache provenance.
  */
 export interface ResolvedTicketReferences {
 	readonly entries: readonly ChangelogEntry[];
@@ -62,13 +62,13 @@ export interface ResolvedTicketReferences {
 }
 
 /**
- * Join {@link aggregate} with {@link lookup} facts. Each candidate target with facts becomes a
- * Changelog Entry. Author facts follow the credit rule: a credit-purpose target is always credited
- * (the commit's PullRequest qualifier is authoritative), and a changelog-only candidate is credited
- * only when GitHub reports it as a pull request. Not-found failures are split by whether the target
- * carried a changelog purpose (candidate) or only a credit purpose. Targets in {@code excluded} were
- * held back by followReferences: they are never looked up, never become entries or credits, and are
- * reported separately from looked-up and not-found targets.
+ * Join {@link aggregate} with {@link lookup} facts. Each unsuppressed candidate target with facts
+ * becomes a Changelog Entry. Author facts follow the credit rule: a credit-purpose target is always
+ * credited (the commit's PullRequest qualifier is authoritative), and a changelog-only candidate is
+ * credited only when GitHub reports it as a pull request. Not-found failures are split by whether the
+ * target carried an effective changelog purpose (candidate) or only a credit purpose. Targets in
+ * {@code excluded} were held back by followReferences: they are never looked up, never become entries
+ * or credits, and are reported separately from looked-up and not-found targets.
  */
 export function resolveTicketReferences(
 	aggregate: Aggregate,
@@ -81,9 +81,13 @@ export function resolveTicketReferences(
 	const excludedKeys = new Set(excluded.map(targetKey));
 	const excludedTargets: TicketTarget[] = [];
 	const flagsByKey = new Map(aggregate.targets.map((t) => [targetKey(t.target), t]));
+	const suppressedChangelogKeys = new Set(
+		[...aggregate.suppressionCandidateKeys].filter((key) => !excludedKeys.has(key)),
+	);
 
 	for (const { target, changelog, credit } of aggregate.targets) {
-		if (excludedKeys.has(targetKey(target))) {
+		const key = targetKey(target);
+		if (excludedKeys.has(key)) {
 			excludedTargets.push(target);
 			continue;
 		}
@@ -92,7 +96,7 @@ export function resolveTicketReferences(
 		if (!facts) {
 			continue;
 		}
-		if (changelog) {
+		if (changelog && !suppressedChangelogKeys.has(key)) {
 			entries.push({
 				target,
 				title: facts.title,
@@ -111,8 +115,10 @@ export function resolveTicketReferences(
 	// otherwise a candidate, so the ledger reports the two outcomes distinctly.
 	for (const target of lookup.notFoundTargets) {
 		const failure = toNotFound(aggregate, target);
-		const flags = flagsByKey.get(targetKey(target));
-		if (flags?.credit && !flags.changelog) {
+		const key = targetKey(target);
+		const flags = flagsByKey.get(key);
+		const changelog = flags?.changelog && !suppressedChangelogKeys.has(key);
+		if (flags?.credit && !changelog) {
 			creditNotFound.push(failure);
 		} else {
 			candidateNotFound.push(failure);

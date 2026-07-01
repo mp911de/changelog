@@ -124,6 +124,13 @@ export interface Aggregate {
 	readonly targets: readonly LookupTarget[];
 
 	/**
+	 * Ticket Target keys that can suppress changelog entry roles after followReferences has removed
+	 * excluded targets. They originate from Original Pull Request credit for commits with a Closing or
+	 * See reference.
+	 */
+	readonly suppressionCandidateKeys: ReadonlySet<string>;
+
+	/**
 	 * The oldest commit that produced an occurrence of each looked-up target, keyed by
 	 * {@link targetKey}, for not-found provenance.
 	 */
@@ -147,6 +154,7 @@ export function aggregateReferences(
 	// so a target can accumulate both purposes.
 	const changelog = new Map<string, TicketTarget>();
 	const credit = new Map<string, TicketTarget>();
+	const suppressionCandidateKeys = new Set<string>();
 
 	const noteTarget = (target: TicketTarget, commit: ReferenceCommit): void => {
 		const key = targetKey(target);
@@ -159,6 +167,7 @@ export function aggregateReferences(
 		// Candidate ranking is per commit: the highest non-empty tier supplies every Changelog
 		// Candidate and demotes the rest. Related references stay outside candidate selection.
 		const tier = highestCandidateTier(occurrences);
+		const pullRequestsAreCreditOnly = tier === "Qualified" || tier === "See";
 
 		const candidates = dedupeByKey();
 		const credits = dedupeByKey();
@@ -171,6 +180,9 @@ export function aggregateReferences(
 				noteTarget(target, commit);
 				credit.set(targetKey(target), target);
 				credits.add(target);
+				if (pullRequestsAreCreditOnly) {
+					suppressionCandidateKeys.add(targetKey(target));
+				}
 			}
 			if (occurrence.qualifier === tier) {
 				noteTarget(target, commit);
@@ -200,7 +212,12 @@ export function aggregateReferences(
 	// Commit-discovery order: each target keeps the position of its first appearance (oldest commit,
 	// textual order within it) and is never reordered by id. A later commit re-citing the same
 	// ticket has already been recorded, so it does not move.
-	return { commits, targets: buildLookupTargets(changelog, credit), provenance };
+	return {
+		commits,
+		targets: buildLookupTargets(changelog, credit),
+		suppressionCandidateKeys,
+		provenance,
+	};
 }
 
 /**
@@ -242,8 +259,8 @@ function dedupeByKey() {
 // makes a missing qualifier a compile error, so ranking can never silently yield undefined.
 const QUALIFIERS = {
 	Qualified: { rank: 4, candidate: true },
-	PullRequest: { rank: 3, candidate: true },
-	See: { rank: 2, candidate: true },
+	See: { rank: 3, candidate: true },
+	PullRequest: { rank: 2, candidate: true },
 	Related: { rank: 1, candidate: false },
 	Simple: { rank: 0, candidate: true },
 } satisfies Record<ReferenceQualifier, { rank: number; candidate: boolean }>;
