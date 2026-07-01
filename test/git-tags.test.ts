@@ -22,8 +22,8 @@ import { join } from "node:path";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 
 import { main } from "../src/cli.js";
-import { gitRepoRefs, listTags, resolveBranch } from "../src/git.js";
-import { resolveAutoRange } from "../src/version.js";
+import { listTags, resolveBranch } from "../src/git.js";
+import { resolveAutoRange, type RepoRefs, type ResolvedBranch } from "../src/version.js";
 
 async function captureStdout(run: () => Promise<void>): Promise<string> {
 	const chunks: string[] = [];
@@ -71,7 +71,6 @@ describe("version resolution against a real repository", () => {
 		git("update-ref", "refs/remotes/origin/4.0.x", "refs/heads/4.0.x");
 
 		git("checkout", "-q", "main");
-		commit("4.1 development");
 		git("branch", "5.0.x", "main");
 		git("branch", "-D", "4.0.x");
 	});
@@ -110,8 +109,34 @@ describe("version resolution against a real repository", () => {
 		expect(await resolveBranch("9.9.x", repo)).toBeUndefined();
 	});
 
+	it("prints just the resolved previous tag for --resolve-previous", async () => {
+		const out = await captureStdout(async () => {
+			await main(["node", "changelog", "--resolve-previous", "4.0.7", "-C", repo]);
+		});
+		expect(out).toBe("4.0.6\n");
+	});
+});
+
+describe("resolveAutoRange from fake repository refs", () => {
+	const TAGS = ["4.0.0", "4.0.1", "4.0.2", "4.0.3", "4.0.4", "4.0.5", "4.0.6"];
+
+	const repoRefs = (config: {
+		tags: readonly string[];
+		branches?: Record<string, ResolvedBranch>;
+	}): RepoRefs => ({
+		tags: async () => config.tags,
+		resolveBranch: async (name) => config.branches?.[name],
+	});
+
 	it("resolves an upcoming patch to its predecessor and the fully-qualified branch ref", async () => {
-		expect(await resolveAutoRange("4.0.7", gitRepoRefs(repo))).toEqual({
+		const refs = repoRefs({
+			tags: TAGS,
+			branches: {
+				"4.0.x": { ref: "refs/remotes/origin/4.0.x", label: "origin/4.0.x" },
+			},
+		});
+
+		expect(await resolveAutoRange("4.0.7", refs)).toEqual({
 			from: { ref: "4.0.6", label: "4.0.6", kind: "tag" },
 			to: {
 				ref: "refs/remotes/origin/4.0.x",
@@ -122,22 +147,22 @@ describe("version resolution against a real repository", () => {
 	});
 
 	it("resolves a line-opener to the previous line opener and HEAD", async () => {
-		expect(await resolveAutoRange("4.1.0", gitRepoRefs(repo))).toEqual({
+		expect(await resolveAutoRange("4.1.0", repoRefs({ tags: TAGS }))).toEqual({
 			from: { ref: "4.0.0", label: "4.0.0", kind: "tag" },
 			to: { ref: "HEAD", label: "HEAD", kind: "head" },
 		});
 	});
 
 	it("fails with a gap when an intermediate patch was never tagged", async () => {
-		await expect(resolveAutoRange("4.0.8", gitRepoRefs(repo))).rejects.toThrow(
+		const refs = repoRefs({
+			tags: TAGS,
+			branches: {
+				"4.0.x": { ref: "refs/remotes/origin/4.0.x", label: "origin/4.0.x" },
+			},
+		});
+
+		await expect(resolveAutoRange("4.0.8", refs)).rejects.toThrow(
 			/Cannot find tag 4\.0\.7/,
 		);
-	});
-
-	it("prints just the resolved previous tag for --resolve-previous", async () => {
-		const out = await captureStdout(async () => {
-			await main(["node", "changelog", "--resolve-previous", "4.0.7", "-C", repo]);
-		});
-		expect(out).toBe("4.0.6\n");
 	});
 });

@@ -17,7 +17,7 @@
 import { generateChangelog } from "./changelog.js";
 import { type ChangelogConfig, followReferenceMatcher } from "./config.js";
 import { parseReferenceOccurrences } from "./commit-parser.js";
-import { scanCommits } from "./git.js";
+import { type CommitRecord, scanCommits, type Trace } from "./git.js";
 import type { Repository } from "./github-context.js";
 import type { LookupFacts } from "./lookup.js";
 import { noRunProgress, type RunProgress, runStage } from "./progress.js";
@@ -38,6 +38,18 @@ export type Lookup = (
 	debug?: (line: string) => void,
 ) => Promise<LookupFacts>;
 
+/**
+ * Scan the {@code from}..{@code to} commit range in {@code cwd}, oldest commit first. The optional
+ * {@code trace} receives each underlying Git command line for the Scanning stage debug output.
+ * Defaults to {@link scanCommits}; injectable so callers can supply commits without a real repository.
+ */
+export type ScanCommits = (
+	from: string,
+	to: string,
+	cwd: string,
+	trace?: Trace,
+) => Promise<CommitRecord[]>;
+
 export interface PipelineOptions {
 	readonly from: string;
 	readonly to: string;
@@ -46,22 +58,19 @@ export interface PipelineOptions {
 	readonly config: ChangelogConfig;
 	readonly all: boolean;
 	readonly lookup: Lookup;
+	readonly scan?: ScanCommits;
 	readonly progress?: RunProgress;
 }
 
 export async function runPipeline(options: PipelineOptions): Promise<string> {
 	const progress = options.progress ?? noRunProgress;
+	const scan = options.scan ?? scanCommits;
 
 	const aggregate = await runStage(
 		progress,
 		"Scanning",
 		async (debug) => {
-			const commits = await scanCommits(
-				options.from,
-				options.to,
-				options.cwd,
-				debug,
-			);
+			const commits = await scan(options.from, options.to, options.cwd, debug);
 			const collected: CommitReferences[] = commits.map((commit) => ({
 				commit: {
 					sha: commit.sha,

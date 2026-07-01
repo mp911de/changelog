@@ -14,14 +14,14 @@
  * limitations under the License.
  */
 
-import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { describe, expect, it } from "vitest";
 
 import type { ChangelogConfig } from "../src/config.js";
 import type { ResolvedTicket } from "../src/lookup.js";
 import { runPipeline } from "../src/pipeline.js";
 import type { RunProgress, RunProgressEvent } from "../src/progress.js";
 import { targetKey, type TicketTarget } from "../src/ticket-references.js";
-import { FixtureRepo } from "./fixture-repo.js";
+import { commit, failingScan, scanning } from "./commit-fixture.js";
 
 function recordingProgress(): { events: RunProgressEvent[] } & RunProgress {
 	const events: RunProgressEvent[] = [];
@@ -74,30 +74,20 @@ function ticket(id: string, title: string, labels: readonly string[]): ResolvedT
 }
 
 describe("runPipeline", () => {
-	let repo: FixtureRepo;
-
-	beforeEach(() => {
-		repo = FixtureRepo.create();
-	});
-
-	afterEach(() => {
-		repo.cleanup();
-	});
-
 	it("returns only the Changelog Document", async () => {
-		const from = repo.commit("Initial commit");
-		repo.commit("#101 Add widgets");
-		repo.commit("#102 Fix gadget");
-		repo.commit("#404 Vanished issue");
-		repo.commit("Chore: no reference here");
-
 		const document = await runPipeline({
-			from,
+			from: "base",
 			to: "HEAD",
-			cwd: repo.dir,
+			cwd: ".",
 			repository: { owner: "octo", repo: "widgets" },
 			config,
 			all: false,
+			scan: scanning(
+				"#101 Add widgets",
+				"#102 Fix gadget",
+				"#404 Vanished issue",
+				"Chore: no reference here",
+			),
 			lookup: mockLookup({
 				"#101": ticket("#101", "Add widgets", ["enhancement"]),
 				"#102": ticket("#102", "Fix gadget", ["bug"]),
@@ -114,17 +104,17 @@ describe("runPipeline", () => {
 	});
 
 	it("keeps tickets with the same id in different repositories distinct", async () => {
-		const from = repo.commit("Initial commit");
-		repo.commit("#1 Local change");
-		repo.commit("Cross-repository change\n\nCloses acme/gizmos#1");
-
 		const document = await runPipeline({
-			from,
+			from: "base",
 			to: "HEAD",
-			cwd: repo.dir,
+			cwd: ".",
 			repository: { owner: "octo", repo: "widgets" },
 			config,
 			all: false,
+			scan: scanning(
+				"#1 Local change",
+				"Cross-repository change\n\nCloses acme/gizmos#1",
+			),
 			lookup: mockLookup({
 				"#1": ticket("#1", "Local change", ["enhancement"]),
 				"acme/gizmos#1": ticket("#1", "Cross-repository change", ["enhancement"]),
@@ -138,11 +128,6 @@ describe("runPipeline", () => {
 	});
 
 	it("does not look up a cross-repository reference outside followReferences", async () => {
-		const from = repo.commit("base");
-		repo.commit("Local change\n\nCloses #1");
-		repo.commit("Allowed cross-repo\n\nCloses octo/extras#5");
-		repo.commit("Forbidden cross-repo\n\nCloses forbidden/repo#9");
-
 		const known: Record<string, ResolvedTicket> = {
 			"#1": ticket("#1", "Local change", ["enhancement"]),
 			"octo/extras#5": ticket("#5", "Allowed cross repo", ["enhancement"]),
@@ -166,13 +151,18 @@ describe("runPipeline", () => {
 
 		const progress = recordingProgress();
 		const document = await runPipeline({
-			from,
+			from: "base",
 			to: "HEAD",
-			cwd: repo.dir,
+			cwd: ".",
 			repository: { owner: "octo", repo: "widgets" },
 			config: { ...config, followReferences: ["octo/*"] },
 			all: false,
 			progress,
+			scan: scanning(
+				"Local change\n\nCloses #1",
+				"Allowed cross-repo\n\nCloses octo/extras#5",
+				"Forbidden cross-repo\n\nCloses forbidden/repo#9",
+			),
 			lookup,
 		});
 
@@ -197,20 +187,16 @@ describe("runPipeline", () => {
 	});
 
 	it("emits the three visible stages in order and proves there is no Parsing stage", async () => {
-		const from = repo.commit("Initial commit");
-		repo.commit("#101 Add widgets");
-		repo.commit("#102 Fix gadget");
-		repo.commit("#404 Vanished issue");
-
 		const progress = recordingProgress();
 		await runPipeline({
-			from,
+			from: "base",
 			to: "HEAD",
-			cwd: repo.dir,
+			cwd: ".",
 			repository: { owner: "octo", repo: "widgets" },
 			config,
 			all: false,
 			progress,
+			scan: scanning("#101 Add widgets", "#102 Fix gadget", "#404 Vanished issue"),
 			lookup: mockLookup({
 				"#101": ticket("#101", "Add widgets", ["enhancement"]),
 				"#102": ticket("#102", "Fix gadget", ["bug"]),
@@ -225,33 +211,29 @@ describe("runPipeline", () => {
 	});
 
 	it("carries Aggregated, Resolved, and the generation summary on the completion events", async () => {
-		const from = repo.commit("Initial commit");
-		repo.commit("#101 Add widgets");
-		repo.commit("#102 Fix gadget");
-		repo.commit("#404 Vanished issue");
-
 		const progress = recordingProgress();
 		await runPipeline({
-			from,
+			from: "base",
 			to: "HEAD",
-			cwd: repo.dir,
+			cwd: ".",
 			repository: { owner: "octo", repo: "widgets" },
 			config,
 			all: false,
 			progress,
+			scan: scanning("#101 Add widgets", "#102 Fix gadget", "#404 Vanished issue"),
 			lookup: mockLookup({
 				"#101": ticket("#101", "Add widgets", ["enhancement"]),
 				"#102": ticket("#102", "Fix gadget", ["bug"]),
 			}),
 		});
 
-		const scanning = progress.events.find(
+		const scanningEvent = progress.events.find(
 			(event) => event.type === "scanning-complete",
 		);
-		expect(scanning).toMatchObject({ commits: 3 });
+		expect(scanningEvent).toMatchObject({ commits: 3 });
 		expect(
-			scanning?.type === "scanning-complete" &&
-				scanning.aggregate.targets
+			scanningEvent?.type === "scanning-complete" &&
+				scanningEvent.aggregate.targets
 					.filter((flagged) => flagged.changelog)
 					.map((flagged) => flagged.target.id),
 		).toEqual(["#101", "#102", "#404"]);
@@ -273,19 +255,16 @@ describe("runPipeline", () => {
 	});
 
 	it("reports candidate and credit-only not-found failures separately", async () => {
-		const from = repo.commit("base");
-
-		repo.commit("Backport\n\nCloses #404\n\nOriginal pull request: #500");
-
 		const progress = recordingProgress();
 		await runPipeline({
-			from,
+			from: "base",
 			to: "HEAD",
-			cwd: repo.dir,
+			cwd: ".",
 			repository: { owner: "octo", repo: "widgets" },
 			config,
 			all: false,
 			progress,
+			scan: scanning("Backport\n\nCloses #404\n\nOriginal pull request: #500"),
 			lookup: mockLookup({}),
 		});
 
@@ -304,20 +283,19 @@ describe("runPipeline", () => {
 	});
 
 	it("reports an unresolved suppressed Original pull request as a credit-only not-found failure", async () => {
-		const from = repo.commit("base");
-
-		repo.commit("Original contribution\n\nOriginal pull request: #500");
-		repo.commit("Backport\n\nCloses #404\n\nOriginal pull request: #500");
-
 		const progress = recordingProgress();
 		const document = await runPipeline({
-			from,
+			from: "base",
 			to: "HEAD",
-			cwd: repo.dir,
+			cwd: ".",
 			repository: { owner: "octo", repo: "widgets" },
 			config,
 			all: false,
 			progress,
+			scan: scanning(
+				"Original contribution\n\nOriginal pull request: #500",
+				"Backport\n\nCloses #404\n\nOriginal pull request: #500",
+			),
 			lookup: mockLookup({
 				"#404": ticket("#404", "Backport fix", ["bug"]),
 			}),
@@ -339,19 +317,16 @@ describe("runPipeline", () => {
 	});
 
 	it("does not promote a demoted lower tier when the selected candidate fails to resolve", async () => {
-		const from = repo.commit("base");
-
-		repo.commit("Work\n\nCloses #404\n\nSee also #99");
-
 		const progress = recordingProgress();
 		const document = await runPipeline({
-			from,
+			from: "base",
 			to: "HEAD",
-			cwd: repo.dir,
+			cwd: ".",
 			repository: { owner: "octo", repo: "widgets" },
 			config,
 			all: false,
 			progress,
+			scan: scanning("Work\n\nCloses #404\n\nSee also #99"),
 			lookup: mockLookup({
 				"#99": ticket("#99", "Demoted should not appear", ["enhancement"]),
 			}),
@@ -367,19 +342,16 @@ describe("runPipeline", () => {
 	});
 
 	it("documents only rendered entries, not excluded ones that were still looked up", async () => {
-		const from = repo.commit("Initial commit");
-		repo.commit("#101 Add widgets");
-		repo.commit("#102 Housekeeping");
-
 		const progress = recordingProgress();
 		await runPipeline({
-			from,
+			from: "base",
 			to: "HEAD",
-			cwd: repo.dir,
+			cwd: ".",
 			repository: { owner: "octo", repo: "widgets" },
 			config,
 			all: false,
 			progress,
+			scan: scanning("#101 Add widgets", "#102 Housekeeping"),
 			lookup: mockLookup({
 				"#101": ticket("#101", "Add widgets", ["enhancement"]),
 				"#102": ticket("#102", "Housekeeping", ["type: task"]),
@@ -402,18 +374,18 @@ describe("runPipeline", () => {
 	});
 
 	it("fails the active stage when scanning fails", async () => {
-		repo.commit("Initial commit");
 		const progress = recordingProgress();
 
 		await expect(
 			runPipeline({
 				from: "missing-from",
 				to: "missing-to",
-				cwd: repo.dir,
+				cwd: ".",
 				repository: { owner: "octo", repo: "widgets" },
 				config,
 				all: false,
 				progress,
+				scan: failingScan("git log failed"),
 				lookup: mockLookup({}),
 			}),
 		).rejects.toThrow();
@@ -426,18 +398,20 @@ describe("runPipeline", () => {
 	});
 
 	it("files git trace lines under the Scanning stage", async () => {
-		const base = repo.commit("base");
-		repo.commit("#1 Add things");
 		const progress = recordingProgress();
 
 		await runPipeline({
-			from: base,
+			from: "base",
 			to: "HEAD",
-			cwd: repo.dir,
+			cwd: ".",
 			repository: { owner: "octo", repo: "widgets" },
 			config,
 			all: false,
 			progress,
+			scan: async (from, to, cwd, trace) => {
+				trace?.(`git log ${from}..${to}`);
+				return [commit("#1 Add things")];
+			},
 			lookup: mockLookup({}),
 		});
 
@@ -453,18 +427,17 @@ describe("runPipeline", () => {
 	});
 
 	it("files GitHub trace lines under the Looking up stage", async () => {
-		const base = repo.commit("base");
-		repo.commit("#1 Add things");
 		const progress = recordingProgress();
 
 		await runPipeline({
-			from: base,
+			from: "base",
 			to: "HEAD",
-			cwd: repo.dir,
+			cwd: ".",
 			repository: { owner: "octo", repo: "widgets" },
 			config,
 			all: false,
 			progress,
+			scan: scanning("#1 Add things"),
 			lookup: async (targets, debug) => {
 				debug?.("GET /repos/o/r/issues/1 → 200");
 				return {

@@ -26,16 +26,18 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { pathToFileURL } from "node:url";
 
-import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { afterAll, afterEach, beforeEach, describe, expect, it } from "vitest";
 
-import type { ResolvedTicket } from "../src/lookup.js";
 import {
 	type GitHubAdapterFactory,
 	isMainModule,
 	main,
 	type Runtime,
 } from "../src/cli.js";
+import type { ResolvedTicket } from "../src/lookup.js";
+import type { ScanCommits } from "../src/pipeline.js";
 import { targetKey } from "../src/ticket-references.js";
+import { failingScan, scanning } from "./commit-fixture.js";
 import { FixtureRepo } from "./fixture-repo.js";
 
 const ESC = String.fromCharCode(27);
@@ -53,6 +55,7 @@ function stripAnsi(text: string): string {
 function captureRuntime(
 	cwd?: string,
 	githubAdapter?: GitHubAdapterFactory,
+	scan?: ScanCommits,
 ): {
 	out: string[];
 	err: string[];
@@ -78,6 +81,7 @@ function captureRuntime(
 			},
 			cwd,
 			githubAdapter,
+			scan,
 		},
 	};
 }
@@ -228,23 +232,59 @@ describe("main argument parsing", () => {
 });
 
 describe("main run-level", () => {
-	let repo: FixtureRepo;
+	let runDir: string;
 
 	beforeEach(() => {
-		repo = FixtureRepo.create();
+		runDir = mkdtempSync(join(tmpdir(), "changelog-run-"));
 	});
 
 	afterEach(() => {
-		repo.cleanup();
+		rmSync(runDir, { recursive: true, force: true });
 	});
 
+	// One immutable repository with a fixed topology, built once (memoized, so scan-injected
+	// tests never pay for it) and shared by every test that exercises real Git paths. Auto-range
+	// targets resolve against its tags (1.1.0 scans 1.0.0..1.1.0, 4.0.0.RELEASE scans
+	// 3.0.0.RELEASE..HEAD and thus the entire history); tests that need a specific commit mix
+	// pass explicit sha ranges. After construction the repository is read-only: tests must not
+	// commit, tag, or write into repo.dir — file outputs go to the per-test runDir.
+	let sharedRepo:
+		| {
+				repo: FixtureRepo;
+				sha: Record<"c1" | "c3" | "c4" | "c5" | "c7" | "c9", string>;
+		  }
+		| undefined;
+
+	const topology = () => {
+		if (!sharedRepo) {
+			const repo = FixtureRepo.create();
+			repo.commit("base");
+			repo.git("tag", "1.0.0");
+			repo.git("tag", "3.0.0.RELEASE");
+			const c1 = repo.commit("Fixes #1 Add feature");
+			repo.git("tag", "1.1.0");
+			repo.commit("#7 Add feature");
+			const c3 = repo.commit("Bump dependency version");
+			const c4 = repo.commit("Closes #404 Vanished");
+			const c5 = repo.commit(
+				"Closes #11, closes #12\n\nOriginal pull request: #20\n\nSee also #30",
+			);
+			repo.commit("Tidy up\n\nRelated tickets: #50");
+			const c7 = repo.commit("Bump dependency version");
+			repo.commit("Closes #12");
+			const c9 = repo.commit("Closes testowner/testrepo#12");
+			sharedRepo = { repo, sha: { c1, c3, c4, c5, c7, c9 } };
+		}
+		return sharedRepo;
+	};
+
+	afterAll(() => sharedRepo?.repo.cleanup());
+
 	it("accepts a Spring-style release version as an automatic range target", async () => {
-		repo.commit("base");
-		repo.git("tag", "3.0.0.RELEASE");
-		repo.commit("Fixes #1 Add feature");
+		const { repo } = topology();
 
 		const adapter = mockGitHubAdapter({
-			"#1": resolvedTicket("Add feature", ["enhancement"]),
+			"#1": resolvedTicket("Shiny feature", ["enhancement"]),
 		});
 		const { out, err, runtime } = captureRuntime(repo.dir, adapter);
 		const code = await main(
@@ -253,15 +293,12 @@ describe("main run-level", () => {
 		);
 
 		expect(code).toBe(0);
-		expect(out.join("")).toContain("Add feature");
+		expect(out.join("")).toContain("Shiny feature");
 		expect(err.join("")).toBe("");
 	});
 
 	it("resolves --resolve-previous from tags and returns 0", async () => {
-		repo.commit("base");
-		repo.git("tag", "1.0.0");
-		repo.commit("first");
-		repo.git("tag", "1.1.0");
+		const { repo } = topology();
 
 		const { out, err, runtime } = captureRuntime(repo.dir);
 		const code = await main(
@@ -275,13 +312,10 @@ describe("main run-level", () => {
 	});
 
 	it("generates a changelog to stdout and returns 0", async () => {
-		repo.commit("base");
-		repo.git("tag", "1.0.0");
-		repo.commit("Fixes #1 Add feature");
-		repo.git("tag", "1.1.0");
+		const { repo } = topology();
 
 		const adapter = mockGitHubAdapter({
-			"#1": resolvedTicket("Add feature", ["enhancement"]),
+			"#1": resolvedTicket("Shiny feature", ["enhancement"]),
 		});
 		const { out, err, runtime } = captureRuntime(repo.dir, adapter);
 		const code = await main(
@@ -290,20 +324,17 @@ describe("main run-level", () => {
 		);
 
 		expect(code).toBe(0);
-		expect(out.join("")).toContain("Add feature");
+		expect(out.join("")).toContain("Shiny feature");
 		expect(err.join("")).toBe("");
 	});
 
 	it("uses a valid -C directory as the run cwd", async () => {
-		repo.commit("base");
-		repo.git("tag", "1.0.0");
-		repo.commit("Fixes #1 Add feature");
-		repo.git("tag", "1.1.0");
+		const { repo } = topology();
 		const outside = mkdtempSync(join(tmpdir(), "changelog-cwd-"));
 
 		try {
 			const adapter = mockGitHubAdapter({
-				"#1": resolvedTicket("Add feature", ["enhancement"]),
+				"#1": resolvedTicket("Shiny feature", ["enhancement"]),
 			});
 			const { out, err, runtime } = captureRuntime(outside, adapter);
 			const code = await main(
@@ -321,7 +352,7 @@ describe("main run-level", () => {
 			);
 
 			expect(code).toBe(0);
-			expect(out.join("")).toContain("Add feature");
+			expect(out.join("")).toContain("Shiny feature");
 			expect(err.join("")).toBe("");
 		} finally {
 			rmSync(outside, { recursive: true, force: true });
@@ -329,13 +360,12 @@ describe("main run-level", () => {
 	});
 
 	it("writes the changelog to a file and returns 0", async () => {
-		repo.commit("base");
-		repo.git("tag", "1.0.0");
-		repo.commit("Fixes #2 Fix bug");
-		repo.git("tag", "1.1.0");
-		const outputFile = join(repo.dir, "notes.md");
+		const { repo } = topology();
+		const outputFile = join(runDir, "notes.md");
 
-		const adapter = mockGitHubAdapter({ "#2": resolvedTicket("Fix bug", ["bug"]) });
+		const adapter = mockGitHubAdapter({
+			"#1": resolvedTicket("Shiny feature", ["enhancement"]),
+		});
 		const { runtime } = captureRuntime(repo.dir, adapter);
 		const code = await main(
 			["node", "changelog", "--output", outputFile, "--quiet", "1.1.0"],
@@ -343,39 +373,54 @@ describe("main run-level", () => {
 		);
 
 		expect(code).toBe(0);
-		const { readFileSync } = await import("node:fs");
-		expect(readFileSync(outputFile, "utf8")).toContain("Fix bug");
+		expect(readFileSync(outputFile, "utf8")).toContain("Shiny feature");
+	});
+
+	it("writes to release-notes.md in the run directory when --output is omitted", async () => {
+		const adapter = mockGitHubAdapter({
+			"#1": resolvedTicket("Shiny feature", ["enhancement"]),
+		});
+		const { runtime } = captureRuntime(
+			runDir,
+			adapter,
+			scanning("Fixes #1 Add feature"),
+		);
+		const code = await main(["node", "changelog", "--quiet", "base..HEAD"], runtime);
+
+		expect(code).toBe(0);
+		expect(readFileSync(join(runDir, "release-notes.md"), "utf8")).toContain(
+			"Shiny feature",
+		);
 	});
 
 	it("replaces an output symlink without overwriting its target", async () => {
-		repo.commit("base");
-		repo.git("tag", "1.0.0");
-		repo.commit("Fixes #2 Fix bug");
-		repo.git("tag", "1.1.0");
-		const target = join(repo.dir, "protected.txt");
-		const outputFile = join(repo.dir, "release-notes.md");
+		const { repo } = topology();
+		const target = join(runDir, "protected.txt");
+		const outputFile = join(runDir, "release-notes.md");
 		writeFileSync(target, "keep me\n", "utf8");
 		symlinkSync(target, outputFile);
 
-		const adapter = mockGitHubAdapter({ "#2": resolvedTicket("Fix bug", ["bug"]) });
+		const adapter = mockGitHubAdapter({
+			"#1": resolvedTicket("Shiny feature", ["enhancement"]),
+		});
 		const { runtime } = captureRuntime(repo.dir, adapter);
-		const code = await main(["node", "changelog", "--quiet", "1.1.0"], runtime);
+		const code = await main(
+			["node", "changelog", "--output", outputFile, "--quiet", "1.1.0"],
+			runtime,
+		);
 
 		expect(code).toBe(0);
 		expect(readFileSync(target, "utf8")).toBe("keep me\n");
 		expect(lstatSync(outputFile).isSymbolicLink()).toBe(false);
-		expect(readFileSync(outputFile, "utf8")).toContain("Fix bug");
+		expect(readFileSync(outputFile, "utf8")).toContain("Shiny feature");
 	});
 
 	it("renders the full run view to stdout for normal file output and keeps the document off stdout", async () => {
-		repo.commit("base");
-		repo.git("tag", "1.0.0");
-		repo.commit("Fixes #3 Tidy up");
-		repo.git("tag", "1.1.0");
-		const outputFile = join(repo.dir, "notes.md");
+		const { repo } = topology();
+		const outputFile = join(runDir, "notes.md");
 
 		const adapter = mockGitHubAdapter({
-			"#3": resolvedTicket("Tidy up", ["enhancement"]),
+			"#1": resolvedTicket("Shiny feature", ["enhancement"]),
 		});
 		const { out, err, runtime } = captureRuntime(repo.dir, adapter);
 		const code = await main(
@@ -386,20 +431,16 @@ describe("main run-level", () => {
 		expect(code).toBe(0);
 
 		expect(stripAnsi(out.join(""))).toContain("✔ Created");
-		expect(out.join("")).not.toContain("Tidy up");
+		expect(out.join("")).not.toContain("Shiny feature");
 		expect(err.join("")).toBe("");
-		const { readFileSync } = await import("node:fs");
-		expect(readFileSync(outputFile, "utf8")).toContain("Tidy up");
+		expect(readFileSync(outputFile, "utf8")).toContain("Shiny feature");
 	});
 
 	it("keeps stdout clean and routes debug traces to stderr for stdout output with --debug", async () => {
-		repo.commit("base");
-		repo.git("tag", "1.0.0");
-		repo.commit("Fixes #5 Improve docs");
-		repo.git("tag", "1.1.0");
+		const { repo } = topology();
 
 		const adapter = mockGitHubAdapter({
-			"#5": resolvedTicket("Improve docs", ["documentation"]),
+			"#1": resolvedTicket("Shiny feature", ["enhancement"]),
 		});
 		const { out, err, runtime } = captureRuntime(repo.dir, adapter);
 		const code = await main(
@@ -409,11 +450,11 @@ describe("main run-level", () => {
 
 		expect(code).toBe(0);
 
-		expect(out.join("")).toContain("Improve docs");
+		expect(out.join("")).toContain("Shiny feature");
 		expect(out.join("")).not.toContain("✔ Created");
 
 		expect(err.join("").length).toBeGreaterThan(0);
-		expect(err.join("")).not.toContain("Improve docs");
+		expect(err.join("")).not.toContain("Shiny feature");
 
 		const errText = err.join("");
 		for (const chrome of [
@@ -431,7 +472,11 @@ describe("main run-level", () => {
 	});
 
 	it("returns 1 and writes a concise error on runtime failure without --debug", async () => {
-		const { err, runtime } = captureRuntime(repo.dir, mockGitHubAdapter({}));
+		const { err, runtime } = captureRuntime(
+			runDir,
+			mockGitHubAdapter({}),
+			failingScan("git log failed"),
+		);
 		const code = await main(
 			["node", "changelog", "--quiet", "bad-from", "bad-to"],
 			runtime,
@@ -444,6 +489,7 @@ describe("main run-level", () => {
 	});
 
 	it("lets git log validate an explicit Git range during scanning", async () => {
+		const { repo } = topology();
 		let adapterCalls = 0;
 		const adapter: GitHubAdapterFactory = async () => {
 			adapterCalls += 1;
@@ -462,7 +508,11 @@ describe("main run-level", () => {
 	});
 
 	it("includes a stack trace on runtime failure when --debug is active", async () => {
-		const { err, runtime } = captureRuntime(repo.dir, mockGitHubAdapter({}));
+		const { err, runtime } = captureRuntime(
+			runDir,
+			mockGitHubAdapter({}),
+			failingScan("git log failed"),
+		);
 		const code = await main(
 			["node", "changelog", "--debug", "--output", "-", "bad-from", "bad-to"],
 			runtime,
@@ -473,15 +523,16 @@ describe("main run-level", () => {
 	});
 
 	it("accepts an explicit from..to range and returns 0", async () => {
-		const from = repo.commit("base");
-		repo.commit("Fixes #4 Feature");
-
 		const adapter = mockGitHubAdapter({
 			"#4": resolvedTicket("Feature", ["enhancement"]),
 		});
-		const { out, runtime } = captureRuntime(repo.dir, adapter);
+		const { out, runtime } = captureRuntime(
+			runDir,
+			adapter,
+			scanning("Fixes #4 Feature"),
+		);
 		const code = await main(
-			["node", "changelog", "--output", "-", "--quiet", `${from}..HEAD`],
+			["node", "changelog", "--output", "-", "--quiet", "base..HEAD"],
 			runtime,
 		);
 
@@ -490,10 +541,6 @@ describe("main run-level", () => {
 	});
 
 	it("produces one entry and one GitHub request for one target referenced by Simple syntax in two commits", async () => {
-		const from = repo.commit("base");
-		repo.commit("#1234 Add the feature");
-		repo.commit("#1234 Polish the feature");
-
 		const requested: string[] = [];
 		const adapter: GitHubAdapterFactory = async () => ({
 			repo: { owner: "testowner", repo: "testrepo" },
@@ -512,9 +559,13 @@ describe("main run-level", () => {
 				return { facts, notFoundTargets: [], cached: 0, fetched: facts.size };
 			},
 		});
-		const { out, runtime } = captureRuntime(repo.dir, adapter);
+		const { out, runtime } = captureRuntime(
+			runDir,
+			adapter,
+			scanning("#1234 Add the feature", "#1234 Polish the feature"),
+		);
 		const code = await main(
-			["node", "changelog", "--output", "-", "--quiet", `${from}..HEAD`],
+			["node", "changelog", "--output", "-", "--quiet", "base..HEAD"],
 			runtime,
 		);
 
@@ -527,9 +578,7 @@ describe("main run-level", () => {
 	});
 
 	it("looks up a local and explicitly current-repository reference only once", async () => {
-		const from = repo.commit("base");
-		repo.commit("Closes #12");
-		repo.commit("Closes testowner/testrepo#12");
+		const { repo, sha } = topology();
 
 		const requested: string[] = [];
 		const adapter: GitHubAdapterFactory = async () => ({
@@ -548,30 +597,30 @@ describe("main run-level", () => {
 			},
 		});
 		const { out, runtime } = captureRuntime(repo.dir, adapter);
-		const outputFile = join(repo.dir, "notes.md");
+		const outputFile = join(runDir, "notes.md");
 		const code = await main(
-			["node", "changelog", "--output", outputFile, `${from}..HEAD`],
+			["node", "changelog", "--output", outputFile, `${sha.c7}..${sha.c9}`],
 			runtime,
 		);
 
 		expect(code).toBe(0);
 		expect(requested).toEqual(["#12"]);
 		expect(stripAnsi(out.join(""))).toContain("1 unique ticket reference");
-		const { readFileSync } = await import("node:fs");
 		expect(readFileSync(outputFile, "utf8").match(/One target/g)).toHaveLength(1);
 	});
 
 	it("documents a backport's issue and credits its Original pull request author separately", async () => {
-		const from = repo.commit("base");
-		repo.commit("Backport fix\n\nCloses #10\n\nOriginal pull request: #20");
-
 		const adapter = mockGitHubAdapter({
 			"#10": resolvedTicket("Backport fix", ["bug"]),
 			"#20": resolvedTicket("The pull request", [], false, "contrib"),
 		});
-		const { out, runtime } = captureRuntime(repo.dir, adapter);
+		const { out, runtime } = captureRuntime(
+			runDir,
+			adapter,
+			scanning("Backport fix\n\nCloses #10\n\nOriginal pull request: #20"),
+		);
 		const code = await main(
-			["node", "changelog", "--output", "-", "--quiet", `${from}..HEAD`],
+			["node", "changelog", "--output", "-", "--quiet", "base..HEAD"],
 			runtime,
 		);
 
@@ -584,19 +633,20 @@ describe("main run-level", () => {
 	});
 
 	it("credits multiple Original pull request authors without documenting their pull request titles", async () => {
-		const from = repo.commit("base");
-		repo.commit(
-			"Backport fix\n\nCloses #10\n\nOriginal pull request: #20\n\nOriginal pull request: #21",
-		);
-
 		const adapter = mockGitHubAdapter({
 			"#10": resolvedTicket("Backport fix", ["bug"]),
 			"#20": resolvedTicket("First pull request", ["bug"], false, "zoe"),
 			"#21": resolvedTicket("Second pull request", ["bug"], false, "alice"),
 		});
-		const { out, runtime } = captureRuntime(repo.dir, adapter);
+		const { out, runtime } = captureRuntime(
+			runDir,
+			adapter,
+			scanning(
+				"Backport fix\n\nCloses #10\n\nOriginal pull request: #20\n\nOriginal pull request: #21",
+			),
+		);
 		const code = await main(
-			["node", "changelog", "--output", "-", "--quiet", `${from}..HEAD`],
+			["node", "changelog", "--output", "-", "--quiet", "base..HEAD"],
 			runtime,
 		);
 
@@ -610,16 +660,17 @@ describe("main run-level", () => {
 	});
 
 	it("documents a See issue and credits its Original pull request author separately", async () => {
-		const from = repo.commit("base");
-		repo.commit("Backport follow-up\n\nSee #10\n\nOriginal pull request: #20");
-
 		const adapter = mockGitHubAdapter({
 			"#10": resolvedTicket("Follow-up issue", ["bug"]),
 			"#20": resolvedTicket("The pull request", [], false, "contrib"),
 		});
-		const { out, runtime } = captureRuntime(repo.dir, adapter);
+		const { out, runtime } = captureRuntime(
+			runDir,
+			adapter,
+			scanning("Backport follow-up\n\nSee #10\n\nOriginal pull request: #20"),
+		);
 		const code = await main(
-			["node", "changelog", "--output", "-", "--quiet", `${from}..HEAD`],
+			["node", "changelog", "--output", "-", "--quiet", "base..HEAD"],
 			runtime,
 		);
 
@@ -632,19 +683,20 @@ describe("main run-level", () => {
 	});
 
 	it("credits multiple Original pull request authors without displacing a See issue", async () => {
-		const from = repo.commit("base");
-		repo.commit(
-			"Backport follow-up\n\nSee #10\n\nOriginal pull request: #20\n\nOriginal pull request: #21",
-		);
-
 		const adapter = mockGitHubAdapter({
 			"#10": resolvedTicket("Follow-up issue", ["bug"]),
 			"#20": resolvedTicket("First pull request", ["bug"], false, "zoe"),
 			"#21": resolvedTicket("Second pull request", ["bug"], false, "alice"),
 		});
-		const { out, runtime } = captureRuntime(repo.dir, adapter);
+		const { out, runtime } = captureRuntime(
+			runDir,
+			adapter,
+			scanning(
+				"Backport follow-up\n\nSee #10\n\nOriginal pull request: #20\n\nOriginal pull request: #21",
+			),
+		);
 		const code = await main(
-			["node", "changelog", "--output", "-", "--quiet", `${from}..HEAD`],
+			["node", "changelog", "--output", "-", "--quiet", "base..HEAD"],
 			runtime,
 		);
 
@@ -658,15 +710,16 @@ describe("main run-level", () => {
 	});
 
 	it("documents an Original pull request when no Closing or See reference exists", async () => {
-		const from = repo.commit("base");
-		repo.commit("Backport pull request\n\nOriginal pull request: #20");
-
 		const adapter = mockGitHubAdapter({
 			"#20": resolvedTicket("The pull request", ["bug"], false, "contrib"),
 		});
-		const { out, runtime } = captureRuntime(repo.dir, adapter);
+		const { out, runtime } = captureRuntime(
+			runDir,
+			adapter,
+			scanning("Backport pull request\n\nOriginal pull request: #20"),
+		);
 		const code = await main(
-			["node", "changelog", "--output", "-", "--quiet", `${from}..HEAD`],
+			["node", "changelog", "--output", "-", "--quiet", "base..HEAD"],
 			runtime,
 		);
 
@@ -678,17 +731,20 @@ describe("main run-level", () => {
 	});
 
 	it("suppresses an Original pull request entry that is credited by another issue entry in the run", async () => {
-		const from = repo.commit("base");
-		repo.commit("Backport pull request\n\nOriginal pull request: #20");
-		repo.commit("Backport fix\n\nCloses #10\n\nOriginal pull request: #20");
-
 		const adapter = mockGitHubAdapter({
 			"#10": resolvedTicket("Backport fix", ["bug"]),
 			"#20": resolvedTicket("The pull request", ["bug"], false, "contrib"),
 		});
-		const { out, runtime } = captureRuntime(repo.dir, adapter);
+		const { out, runtime } = captureRuntime(
+			runDir,
+			adapter,
+			scanning(
+				"Backport pull request\n\nOriginal pull request: #20",
+				"Backport fix\n\nCloses #10\n\nOriginal pull request: #20",
+			),
+		);
 		const code = await main(
-			["node", "changelog", "--output", "-", "--quiet", `${from}..HEAD`],
+			["node", "changelog", "--output", "-", "--quiet", "base..HEAD"],
 			runtime,
 		);
 
@@ -701,17 +757,20 @@ describe("main run-level", () => {
 	});
 
 	it("does not list a suppressed Original pull request entry under Other Changes", async () => {
-		const from = repo.commit("base");
-		repo.commit("Backport pull request\n\nOriginal pull request: #20");
-		repo.commit("Backport fix\n\nCloses #10\n\nOriginal pull request: #20");
-
 		const adapter = mockGitHubAdapter({
 			"#10": resolvedTicket("Backport fix", ["bug"]),
 			"#20": resolvedTicket("The pull request", ["misc"], false, "contrib"),
 		});
-		const { out, runtime } = captureRuntime(repo.dir, adapter);
+		const { out, runtime } = captureRuntime(
+			runDir,
+			adapter,
+			scanning(
+				"Backport pull request\n\nOriginal pull request: #20",
+				"Backport fix\n\nCloses #10\n\nOriginal pull request: #20",
+			),
+		);
 		const code = await main(
-			["node", "changelog", "--output", "-", "--quiet", "--all", `${from}..HEAD`],
+			["node", "changelog", "--output", "-", "--quiet", "--all", "base..HEAD"],
 			runtime,
 		);
 
@@ -725,18 +784,21 @@ describe("main run-level", () => {
 	});
 
 	it("suppresses only the matching Original pull request ticket identity", async () => {
-		const from = repo.commit("base");
-		repo.commit("Backport fix\n\nCloses #10\n\nOriginal pull request: #20");
-		repo.commit("Follow-up\n\nCloses #20\n\nCloses #30");
-
 		const adapter = mockGitHubAdapter({
 			"#10": resolvedTicket("Backport fix", ["bug"]),
 			"#20": resolvedTicket("The pull request", ["bug"], false, "contrib"),
 			"#30": resolvedTicket("Follow-up issue", ["bug"]),
 		});
-		const { out, runtime } = captureRuntime(repo.dir, adapter);
+		const { out, runtime } = captureRuntime(
+			runDir,
+			adapter,
+			scanning(
+				"Backport fix\n\nCloses #10\n\nOriginal pull request: #20",
+				"Follow-up\n\nCloses #20\n\nCloses #30",
+			),
+		);
 		const code = await main(
-			["node", "changelog", "--output", "-", "--quiet", `${from}..HEAD`],
+			["node", "changelog", "--output", "-", "--quiet", "base..HEAD"],
 			runtime,
 		);
 
@@ -750,15 +812,16 @@ describe("main run-level", () => {
 	});
 
 	it("does not fall back to an Original pull request entry when the See issue is missing", async () => {
-		const from = repo.commit("base");
-		repo.commit("Backport follow-up\n\nSee #10\n\nOriginal pull request: #20");
-
 		const adapter = mockGitHubAdapter({
 			"#20": resolvedTicket("The pull request", ["bug"], false, "contrib"),
 		});
-		const { out, runtime } = captureRuntime(repo.dir, adapter);
+		const { out, runtime } = captureRuntime(
+			runDir,
+			adapter,
+			scanning("Backport follow-up\n\nSee #10\n\nOriginal pull request: #20"),
+		);
 		const code = await main(
-			["node", "changelog", "--output", "-", "--quiet", `${from}..HEAD`],
+			["node", "changelog", "--output", "-", "--quiet", "base..HEAD"],
 			runtime,
 		);
 
@@ -770,17 +833,15 @@ describe("main run-level", () => {
 	});
 
 	it("by default lists no commit rows and reports the Scanned summary facts", async () => {
-		const from = repo.commit("base");
-		repo.commit("#7 Add feature");
-		repo.commit("Bump dependency version");
-		const outputFile = join(repo.dir, "notes.md");
+		const { repo, sha } = topology();
+		const outputFile = join(runDir, "notes.md");
 
 		const adapter = mockGitHubAdapter({
 			"#7": resolvedTicket("Add feature", ["enhancement"]),
 		});
 		const { out, runtime } = captureRuntime(repo.dir, adapter);
 		const code = await main(
-			["node", "changelog", "--output", outputFile, `${from}..HEAD`],
+			["node", "changelog", "--output", outputFile, `${sha.c1}..${sha.c3}`],
 			runtime,
 		);
 
@@ -793,10 +854,8 @@ describe("main run-level", () => {
 	});
 
 	it("--show-missing lists only commits with zero ticket references using an orange sha", async () => {
-		const from = repo.commit("base");
-		repo.commit("#7 Add feature");
-		repo.commit("Bump dependency version");
-		const outputFile = join(repo.dir, "notes.md");
+		const { repo, sha } = topology();
+		const outputFile = join(runDir, "notes.md");
 
 		const adapter = mockGitHubAdapter({
 			"#7": resolvedTicket("Add feature", ["enhancement"]),
@@ -809,7 +868,7 @@ describe("main run-level", () => {
 				"--output",
 				outputFile,
 				"--show-missing",
-				`${from}..HEAD`,
+				`${sha.c1}..${sha.c3}`,
 			],
 			runtime,
 		);
@@ -822,10 +881,8 @@ describe("main run-level", () => {
 	});
 
 	it("--show-commits lists every scanned commit including referenced ones", async () => {
-		const from = repo.commit("base");
-		repo.commit("#7 Add feature");
-		repo.commit("Bump dependency version");
-		const outputFile = join(repo.dir, "notes.md");
+		const { repo, sha } = topology();
+		const outputFile = join(runDir, "notes.md");
 
 		const adapter = mockGitHubAdapter({
 			"#7": resolvedTicket("Add feature", ["enhancement"]),
@@ -838,7 +895,7 @@ describe("main run-level", () => {
 				"--output",
 				outputFile,
 				"--show-commits",
-				`${from}..HEAD`,
+				`${sha.c1}..${sha.c3}`,
 			],
 			runtime,
 		);
@@ -850,11 +907,8 @@ describe("main run-level", () => {
 	});
 
 	it("renders every reference for a multi-reference commit with no omission marker off a TTY", async () => {
-		const from = repo.commit("base");
-		repo.commit(
-			"Closes #11, closes #12\n\nOriginal pull request: #20\n\nSee also #30",
-		);
-		const outputFile = join(repo.dir, "notes.md");
+		const { repo, sha } = topology();
+		const outputFile = join(runDir, "notes.md");
 
 		const adapter = mockGitHubAdapter({
 			"#11": resolvedTicket("First", ["bug"]),
@@ -868,7 +922,7 @@ describe("main run-level", () => {
 				"--output",
 				outputFile,
 				"--show-commits",
-				`${from}..HEAD`,
+				`${sha.c4}..${sha.c5}`,
 			],
 			runtime,
 		);
@@ -883,17 +937,22 @@ describe("main run-level", () => {
 	});
 
 	it("--show-all lists every commit and every lookup outcome", async () => {
-		const from = repo.commit("base");
-		repo.commit("#7 Add feature");
-		repo.commit("Closes #404 Vanished");
-		const outputFile = join(repo.dir, "notes.md");
+		const { repo, sha } = topology();
+		const outputFile = join(runDir, "notes.md");
 
 		const adapter = mockGitHubAdapter({
 			"#7": resolvedTicket("Add feature", ["enhancement"]),
 		});
 		const { out, runtime } = captureRuntime(repo.dir, adapter);
 		const code = await main(
-			["node", "changelog", "--output", outputFile, "--show-all", `${from}..HEAD`],
+			[
+				"node",
+				"changelog",
+				"--output",
+				outputFile,
+				"--show-all",
+				`${sha.c1}..${sha.c4}`,
+			],
 			runtime,
 		);
 
@@ -906,16 +965,13 @@ describe("main run-level", () => {
 	});
 
 	it("counts only zero-occurrence commits as missing and never a Related-only commit", async () => {
-		const from = repo.commit("base");
-
-		repo.commit("Tidy up\n\nRelated tickets: #50");
-		repo.commit("Bump dependency version");
-		const outputFile = join(repo.dir, "notes.md");
+		const { repo, sha } = topology();
+		const outputFile = join(runDir, "notes.md");
 
 		const adapter = mockGitHubAdapter({});
 		const { out, runtime } = captureRuntime(repo.dir, adapter);
 		const code = await main(
-			["node", "changelog", "--output", outputFile, `${from}..HEAD`],
+			["node", "changelog", "--output", outputFile, `${sha.c5}..${sha.c7}`],
 			runtime,
 		);
 
@@ -926,15 +982,16 @@ describe("main run-level", () => {
 	});
 
 	it("credits a candidate author when GitHub reports the closed target as a pull request", async () => {
-		const from = repo.commit("base");
-		repo.commit("Closes #30 Merge the change");
-
 		const adapter = mockGitHubAdapter({
 			"#30": resolvedTicket("Merge the change", ["enhancement"], true, "contrib"),
 		});
-		const { out, runtime } = captureRuntime(repo.dir, adapter);
+		const { out, runtime } = captureRuntime(
+			runDir,
+			adapter,
+			scanning("Closes #30 Merge the change"),
+		);
 		const code = await main(
-			["node", "changelog", "--output", "-", "--quiet", `${from}..HEAD`],
+			["node", "changelog", "--output", "-", "--quiet", "base..HEAD"],
 			runtime,
 		);
 

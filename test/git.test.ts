@@ -17,7 +17,7 @@
 import { appendFileSync, mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { afterAll, beforeAll, describe, expect, it } from "vitest";
 
 import { classifyRef, listTags, resolveCommit, scanCommits } from "../src/git.js";
 import { FixtureRepo } from "./fixture-repo.js";
@@ -25,16 +25,21 @@ import { FixtureRepo } from "./fixture-repo.js";
 describe("scanCommits", () => {
 	let repo: FixtureRepo;
 
-	beforeEach(() => {
+	// Tests share one repo and only append commits; each captures the current tip as its
+	// scan lower bound, so tests stay order-independent.
+	const tip = (): string => repo.git("rev-parse", "HEAD");
+
+	beforeAll(() => {
 		repo = FixtureRepo.create();
+		repo.commit("seed");
 	});
 
-	afterEach(() => {
+	afterAll(() => {
 		repo.cleanup();
 	});
 
 	it("returns only commits in from..to, oldest first", async () => {
-		const base = repo.commit("base");
+		const base = tip();
 		repo.commit("first");
 		repo.commit("second");
 
@@ -44,7 +49,7 @@ describe("scanCommits", () => {
 	});
 
 	it("traces the git log issued while scanning", async () => {
-		const base = repo.commit("base");
+		const base = tip();
 		repo.commit("next");
 		const traced: string[] = [];
 
@@ -55,7 +60,7 @@ describe("scanCommits", () => {
 	});
 
 	it("excludes merge commits", async () => {
-		const base = repo.commit("base");
+		const base = tip();
 		repo.git("checkout", "-q", "-b", "feature");
 		repo.commit("feature work");
 		repo.git("checkout", "-q", "main");
@@ -74,7 +79,7 @@ describe("scanCommits", () => {
 	});
 
 	it("captures full and short messages and the sha", async () => {
-		const base = repo.commit("base");
+		const base = tip();
 		const sha = repo.commit("Subject line\n\nBody paragraph.");
 
 		const [commit] = await scanCommits(base, "HEAD", repo.dir);
@@ -88,7 +93,7 @@ describe("scanCommits", () => {
 	it("preserves record and field separator bytes inside commit messages", async () => {
 		const field = String.fromCharCode(31);
 		const record = String.fromCharCode(30);
-		const base = repo.commit("base");
+		const base = tip();
 		repo.commit(`Subject ${field} one\n\nBody ${record} intact`);
 		repo.commit("second");
 
@@ -101,16 +106,12 @@ describe("scanCommits", () => {
 	});
 
 	it("reports unavailable scan revisions from git log", async () => {
-		repo.commit("base");
-
 		await expect(scanCommits("missing-from", "missing-to", repo.dir)).rejects.toThrow(
 			/git log failed: fatal: ambiguous argument 'missing-from\.\.missing-to'/,
 		);
 	});
 
 	it("reports an unavailable revision consistently when resolving a commit", async () => {
-		repo.commit("base");
-
 		await expect(resolveCommit("missing", repo.dir)).rejects.toThrow(
 			`Git revision "missing" was not found in "${repo.dir}".`,
 		);
@@ -128,39 +129,47 @@ describe("scanCommits", () => {
 	});
 
 	it("surfaces git stderr when git fails for a reason other than an absent ref", async () => {
-		repo.commit("base");
-		repo.git("tag", "v1");
-		// A corrupt packed-refs makes git tag --list exit non-zero with a clear fatal: message; this
-		// exercises the generic failure path rather than the benign rev-parse --verify exit code 1.
-		appendFileSync(
-			join(repo.dir, ".git", "packed-refs"),
-			"not a valid sha refs/tags/v1\n",
-		);
+		// Uses its own repo: corrupting packed-refs would poison the shared one.
+		const local = FixtureRepo.create();
+		try {
+			local.commit("base");
+			local.git("tag", "v1");
+			// A corrupt packed-refs makes git tag --list exit non-zero with a clear fatal: message; this
+			// exercises the generic failure path rather than the benign rev-parse --verify exit code 1.
+			appendFileSync(
+				join(local.dir, ".git", "packed-refs"),
+				"not a valid sha refs/tags/v1\n",
+			);
 
-		await expect(listTags(repo.dir)).rejects.toThrow(
-			/^git tag failed: .*unexpected line in .*packed-refs/,
-		);
+			await expect(listTags(local.dir)).rejects.toThrow(
+				/^git tag failed: .*unexpected line in .*packed-refs/,
+			);
+		} finally {
+			local.cleanup();
+		}
 	});
 });
 
 describe("classifyRef", () => {
 	let repo: FixtureRepo;
+	let sha: string;
 
-	beforeEach(() => {
+	beforeAll(() => {
 		repo = FixtureRepo.create();
-	});
-
-	afterEach(() => {
-		repo.cleanup();
-	});
-
-	it("classifies by git, not by the spelling of the name", async () => {
-		const sha = repo.commit("base");
+		sha = repo.commit("base");
 		// A tag named like a Service Branch, and a branch that does not end in .x: the spelling
 		// is misleading, so classification must come from git.
 		repo.git("tag", "7.0.x");
 		repo.git("branch", "release/7.0");
+		// Simulate the resolved upper-bound form (origin/<branch>) by creating the remote ref.
+		repo.git("update-ref", "refs/remotes/origin/4.0.x", "HEAD");
+	});
 
+	afterAll(() => {
+		repo.cleanup();
+	});
+
+	it("classifies by git, not by the spelling of the name", async () => {
 		expect(await classifyRef("7.0.x", repo.dir)).toBe("tag");
 		expect(await classifyRef("release/7.0", repo.dir)).toBe("branch");
 		expect(await classifyRef("main", repo.dir)).toBe("branch");
@@ -169,10 +178,6 @@ describe("classifyRef", () => {
 	});
 
 	it("classifies a remote-tracking branch as a branch", async () => {
-		repo.commit("base");
-		// Simulate the resolved upper-bound form (origin/<branch>) by creating the remote ref.
-		repo.git("update-ref", "refs/remotes/origin/4.0.x", "HEAD");
-
 		expect(await classifyRef("origin/4.0.x", repo.dir)).toBe("branch");
 	});
 });

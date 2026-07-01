@@ -29,7 +29,7 @@ import { hasCode, hasStringProp } from "./errors.js";
 import { gitRepoRefs } from "./git.js";
 import { defaultGitHubAdapter, type GitHubAdapterFactory } from "./github-adapter.js";
 import type { Repository } from "./github-context.js";
-import { runPipeline } from "./pipeline.js";
+import { runPipeline, type ScanCommits } from "./pipeline.js";
 import { prepareRun, resolveHeaderFields } from "./prepare.js";
 import { noRunProgress, type RunProgress, runStage } from "./progress.js";
 import { createRenderer, createTraceWriter, type OutputStream } from "./render.js";
@@ -83,6 +83,10 @@ export interface Runtime {
 	 */
 	readonly cwd?: string;
 	readonly githubAdapter?: GitHubAdapterFactory;
+	/**
+	 * Scans the commit range. When not provided, the real Git scanner is used.
+	 */
+	readonly scan?: ScanCommits;
 }
 
 function toInvocation(
@@ -194,6 +198,7 @@ interface InternalRuntime {
 	readonly out: OutputStream;
 	readonly err: OutputStream;
 	readonly githubAdapter: GitHubAdapterFactory;
+	readonly scan?: ScanCommits;
 }
 
 /**
@@ -342,6 +347,7 @@ async function execute(
 			config,
 			all: invocation.all,
 			lookup,
+			scan: runtime.scan,
 			progress,
 		});
 
@@ -395,6 +401,7 @@ export async function main(args: string[] = argv, runtime?: Runtime): Promise<nu
 		out,
 		err,
 		githubAdapter: runtime?.githubAdapter ?? defaultGitHubAdapter,
+		scan: runtime?.scan,
 	};
 
 	const program = buildProgram(
