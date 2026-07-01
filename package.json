@@ -1,6 +1,6 @@
 {
 	"name": "@mp911de/changelog",
-	"version": "0.1.1",
+	"version": "0.1.2",
 	"description": "Standalone TypeScript CLI that generates GitHub release notes for a commit range.",
 	"keywords": [
 		"github",
