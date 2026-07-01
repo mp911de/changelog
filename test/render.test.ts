@@ -176,9 +176,14 @@ describe("static reporter", () => {
 
 describe("header box", () => {
 	const fields: HeaderFields = {
-		repoName: "widgets",
+		repository: {
+			owner: "octo",
+			repo: "widgets",
+			url: "https://github.com/octo/widgets",
+		},
 		version: "0.1.0",
-		repository: [{ text: "octo/widgets" }],
+		build: { sha: "abc1234" },
+		repositoryLine: [{ text: "octo/widgets" }],
 		range: [{ text: "4.0.0..HEAD" }, { text: " (abc1234)", style: "faint" }],
 		output: [{ text: "release-notes.md", link: "file:///repo/release-notes.md" }],
 	};
@@ -188,7 +193,7 @@ describe("header box", () => {
 		createRenderer(stream, { capabilities: plain }).headerBox(fields);
 		expect(get()).not.toContain(ESC);
 		expect(get()).not.toContain("╭");
-		expect(get()).toContain(">_ widgets › changelog (v0.1.0)");
+		expect(get()).toContain(">_ widgets › changelog (v0.1.0 · abc1234)");
 		expect(get()).toContain("repository: octo/widgets");
 		expect(get()).toContain("range: 4.0.0..HEAD (abc1234)");
 		expect(get()).toContain("output: release-notes.md");
@@ -198,8 +203,11 @@ describe("header box", () => {
 		const { stream, get } = capture();
 		createRenderer(stream, { capabilities: plain }).headerBox({
 			...fields,
-			repoName: `wid${ESC}]52;c;payload${BEL}\ngets`,
-			repository: [{ text: `octo/${ESC}widgets` }],
+			repository: {
+				...fields.repository,
+				repo: `wid${ESC}]52;c;payload${BEL}\ngets`,
+			},
+			repositoryLine: [{ text: `octo/${ESC}widgets` }],
 		});
 
 		expect(get()).not.toContain(ESC);

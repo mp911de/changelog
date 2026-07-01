@@ -153,13 +153,17 @@ When more than one reference could supply the changelog entry, the strongest kin
 . A `See` reference (`See #1234`).
 . A plain reference (`#1234`).
 
+When a closing reference or `See` reference appears together with one or more original pull request references, the original pull request references are credit-only.
+The closing reference or `See` reference supplies the changelog entry according to the precedence above, and each original pull request reference can still credit its author.
+This role selection happens before GitHub lookup; if the selected closing or `See` reference is missing, excluded, private, or otherwise unavailable, an original pull request reference does not fall back into the changelog entry role.
+
 All references of the winning kind become entries; references of weaker kinds in the same message do not.
 Related references are never entries.
 
 This precedence applies only to the changelog entry.
 Contributor credit is independent: an `Original pull request:` reference always credits its author, even when a closing reference supplies the entry.
 
-NOTE: An `Original pull request:` reference also supplies the changelog entry when the message contains no closing reference, so a pull request that closes nothing explicitly still appears in the notes.
+NOTE: An `Original pull request:` reference also supplies the changelog entry when the message contains no closing or `See` reference, so a pull request that records no issue context explicitly still appears in the notes.
 
 == How Changes become changelog entries
 

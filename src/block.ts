@@ -60,12 +60,22 @@ export interface BlockReporter {
 	dispose(): void;
 }
 
-export interface HeaderFields {
-	readonly repoName: string;
+export interface HeaderRepository {
+	readonly owner: string;
+	readonly repo: string;
+	readonly url: string;
+}
 
-	readonly repoUrl?: string;
+export interface BuildProvenance {
+	readonly sha: string;
+	readonly url?: string;
+}
+
+export interface HeaderFields {
+	readonly repository: HeaderRepository;
 	readonly version: string;
-	readonly repository: readonly Cell[];
+	readonly build: BuildProvenance;
+	readonly repositoryLine: readonly Cell[];
 	readonly range: readonly Cell[];
 	readonly output: readonly Cell[];
 }
@@ -168,18 +178,19 @@ export function headerBoxLines(
 	color: boolean,
 ): string[] {
 	const labels: ReadonlyArray<readonly [string, readonly Cell[]]> = [
-		["repository:", fields.repository],
+		["repository:", fields.repositoryLine],
 		["range:", fields.range],
 		["output:", fields.output],
 	];
 	const raw = (cells: readonly Cell[]): string =>
 		cells.map((cell) => sanitizeTerminalText(cell.text)).join("");
-	const repoName = sanitizeTerminalText(fields.repoName);
+	const repoName = sanitizeTerminalText(fields.repository.repo);
 	const version = sanitizeTerminalText(fields.version);
+	const commitSha = sanitizeTerminalText(fields.build.sha);
 
 	if (!color) {
 		return [
-			`>_ ${repoName} › changelog (v${version})`,
+			`>_ ${repoName} › changelog (v${version} · ${commitSha})`,
 			...labels.map(([label, value]) => `${label} ${raw(value)}`),
 		];
 	}
@@ -187,12 +198,14 @@ export function headerBoxLines(
 	const labelWidth = Math.max(...labels.map(([label]) => label.length));
 	const titleCells: Cell[] = [
 		{ text: ">_ ", style: "faint" },
-		{ text: repoName, style: "bold", link: fields.repoUrl },
+		{ text: repoName, style: "bold", link: fields.repository.url },
 		{ text: " › ", style: "mauve", bold: true },
 		{ text: "changelog", style: "bold" },
-		{ text: ` (v${version})`, style: "faint" },
+		{ text: ` (v${version} · `, style: "faint" },
+		{ text: commitSha, style: "faint", link: fields.build.url },
+		{ text: ")", style: "faint" },
 	];
-	const titleRaw = `>_ ${repoName} › changelog (v${version})`;
+	const titleRaw = `>_ ${repoName} › changelog (v${version} · ${commitSha})`;
 
 	const rows: Array<{ rendered: string; width: number }> = [
 		{ rendered: renderInline(palette, titleCells), width: palette.width(titleRaw) },

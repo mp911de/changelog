@@ -35,7 +35,14 @@ import {
 export type { Affix, Capabilities, Cell, OutputStream, Row, Style } from "./palette.js";
 export { formatDuration } from "./palette.js";
 export type { CommitRow, Emphasis, ReferenceItem } from "./reference-flow.js";
-export type { BlockHandle, ExcludedSection, HeaderFields, StepSummary } from "./block.js";
+export type {
+	BuildProvenance,
+	BlockHandle,
+	ExcludedSection,
+	HeaderFields,
+	HeaderRepository,
+	StepSummary,
+} from "./block.js";
 
 export interface Renderer extends BlockReporter {
 	headerBox(fields: HeaderFields): void;

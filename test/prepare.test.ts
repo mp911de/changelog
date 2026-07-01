@@ -122,12 +122,15 @@ describe("resolveHeaderFields", () => {
 
 		const header = await resolveHeaderFields(
 			{
-				from: { ref: "1.0.0", label: "1.0.0", kind: "tag" },
-				to: { ref: "HEAD", label: "HEAD", kind: "head" },
+				repo: { owner: "octo", repo: "tools" },
+				range: {
+					from: { ref: "1.0.0", label: "1.0.0", kind: "tag" },
+					to: { ref: "HEAD", label: "HEAD", kind: "head" },
+				},
 			},
 			{
-				repo: { owner: "octo", repo: "tools" },
 				version: "9.9.9",
+				build: { sha: "abc1234" },
 				output: "notes.md",
 				outputUrl: "file:///notes.md",
 				cwd: fixture.dir,
@@ -152,12 +155,15 @@ describe("resolveHeaderFields", () => {
 
 		const header = await resolveHeaderFields(
 			{
-				from: { ref: first, label: first },
-				to: { ref: second, label: second },
+				repo: { owner: "o", repo: "r" },
+				range: {
+					from: { ref: first, label: first },
+					to: { ref: second, label: second },
+				},
 			},
 			{
-				repo: { owner: "o", repo: "r" },
 				version: "1",
+				build: { sha: "abc1234" },
 				output: "n.md",
 				outputUrl: "",
 				cwd: fixture.dir,

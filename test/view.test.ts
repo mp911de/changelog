@@ -60,10 +60,13 @@ describe("finalLine", () => {
 describe("headerFields", () => {
 	const sdc = { owner: "spring-projects", repo: "spring-data-commons" };
 	const base = {
-		repo: sdc,
+		repository: sdc,
 		version: "0.1.0",
-		from: "4.0.0",
-		to: "HEAD",
+		build: { sha: "abc1234" },
+		range: {
+			from: { ref: "4.0.0", label: "4.0.0" },
+			to: { ref: "HEAD", label: "HEAD" },
+		},
 		fromKind: "tag" as RefKind,
 		toKind: "head" as RefKind,
 		fromSha: "",
@@ -86,7 +89,10 @@ describe("headerFields", () => {
 		const linkFor = (ref: string, kind: RefKind, sha = "") =>
 			headerFields({
 				...base,
-				from: ref,
+				range: {
+					...base.range,
+					from: { ref, label: ref },
+				},
 				fromKind: kind,
 				fromSha: sha,
 			}).range[0]?.link;
@@ -103,12 +109,14 @@ describe("headerFields", () => {
 
 	it("exposes the short repo name, links the repository home, and links the output", () => {
 		const fields = headerFields(base);
-		expect(fields.repoName).toBe("spring-data-commons");
-		expect(fields.repoUrl).toBe(
+		expect(fields.repository.repo).toBe("spring-data-commons");
+		expect(fields.repository.url).toBe(
 			"https://github.com/spring-projects/spring-data-commons",
 		);
-		expect(fields.repository[0]?.text).toBe("spring-projects/spring-data-commons");
-		expect(fields.repository[0]?.link).toBe(
+		expect(fields.repositoryLine[0]?.text).toBe(
+			"spring-projects/spring-data-commons",
+		);
+		expect(fields.repositoryLine[0]?.link).toBe(
 			"https://github.com/spring-projects/spring-data-commons",
 		);
 		expect(fields.output[0]?.link).toBe("file:///x");

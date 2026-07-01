@@ -21,7 +21,7 @@ import type { GitHubAdapterFactory } from "./github-adapter.js";
 import type { Repository } from "./github-context.js";
 import { headerFields } from "./links.js";
 import type { Lookup } from "./pipeline.js";
-import type { HeaderFields } from "./render.js";
+import type { BuildProvenance, HeaderFields } from "./render.js";
 import { type CliRange, resolveAutoRange, type ResolvedRange } from "./version.js";
 
 /**
@@ -83,8 +83,8 @@ export async function prepareRun(options: PrepareRunOptions): Promise<PreparedRu
 }
 
 export interface HeaderContext {
-	readonly repo: Repository;
 	readonly version: string;
+	readonly build: BuildProvenance;
 	readonly output: string;
 	readonly outputUrl: string;
 	readonly cwd: string;
@@ -98,10 +98,11 @@ export interface HeaderContext {
  * (explicit mode). Called only when a header will render, so the Git work is skipped for quiet runs.
  */
 export async function resolveHeaderFields(
-	range: ResolvedRange,
+	run: Pick<PreparedRun, "repo" | "range">,
 	context: HeaderContext,
 ): Promise<HeaderFields> {
-	const { repo, cwd, trace } = context;
+	const { repo, range } = run;
+	const { cwd, trace } = context;
 	const { from, to } = range;
 
 	const toSha = await resolveCommit(to.ref, cwd, trace);
@@ -115,10 +116,10 @@ export async function resolveHeaderFields(
 	const toKind = to.kind ?? (await classifyRef(to.ref, cwd, trace));
 
 	return headerFields({
-		repo,
+		repository: repo,
 		version: context.version,
-		from: from.label,
-		to: to.label,
+		build: context.build,
+		range,
 		fromKind,
 		toKind,
 		fromSha,

@@ -214,7 +214,7 @@ describe("main argument parsing", () => {
 		const { out, runtime } = captureRuntime();
 		const code = await main(["node", "changelog", "--version"], runtime);
 		expect(code).toBe(0);
-		expect(out.join("")).toMatch(/\d+\.\d+\.\d+/);
+		expect(out.join("")).toMatch(/\d+\.\d+\.\d+ \(dev\)/);
 	});
 
 	it("returns 0 and writes help for --help", async () => {
@@ -579,6 +579,120 @@ describe("main run-level", () => {
 		const document = out.join("");
 
 		expect(document).toContain("- Backport fix. [#10]");
+		expect(document).not.toContain("The pull request");
+		expect(document).toContain("## :heart: Contributors\n- @contrib\n");
+	});
+
+	it("credits multiple Original pull request authors without documenting their pull request titles", async () => {
+		const from = repo.commit("base");
+		repo.commit(
+			"Backport fix\n\nCloses #10\n\nOriginal pull request: #20\n\nOriginal pull request: #21",
+		);
+
+		const adapter = mockGitHubAdapter({
+			"#10": resolvedTicket("Backport fix", ["bug"]),
+			"#20": resolvedTicket("First pull request", ["bug"], false, "zoe"),
+			"#21": resolvedTicket("Second pull request", ["bug"], false, "alice"),
+		});
+		const { out, runtime } = captureRuntime(repo.dir, adapter);
+		const code = await main(
+			["node", "changelog", "--output", "-", "--quiet", `${from}..HEAD`],
+			runtime,
+		);
+
+		expect(code).toBe(0);
+		const document = out.join("");
+
+		expect(document).toContain("- Backport fix. [#10]");
+		expect(document).not.toContain("First pull request");
+		expect(document).not.toContain("Second pull request");
+		expect(document).toContain("## :heart: Contributors\n- @alice\n- @zoe\n");
+	});
+
+	it("documents a See issue and credits its Original pull request author separately", async () => {
+		const from = repo.commit("base");
+		repo.commit("Backport follow-up\n\nSee #10\n\nOriginal pull request: #20");
+
+		const adapter = mockGitHubAdapter({
+			"#10": resolvedTicket("Follow-up issue", ["bug"]),
+			"#20": resolvedTicket("The pull request", [], false, "contrib"),
+		});
+		const { out, runtime } = captureRuntime(repo.dir, adapter);
+		const code = await main(
+			["node", "changelog", "--output", "-", "--quiet", `${from}..HEAD`],
+			runtime,
+		);
+
+		expect(code).toBe(0);
+		const document = out.join("");
+
+		expect(document).toContain("- Follow-up issue. [#10]");
+		expect(document).not.toContain("The pull request");
+		expect(document).toContain("## :heart: Contributors\n- @contrib\n");
+	});
+
+	it("credits multiple Original pull request authors without displacing a See issue", async () => {
+		const from = repo.commit("base");
+		repo.commit(
+			"Backport follow-up\n\nSee #10\n\nOriginal pull request: #20\n\nOriginal pull request: #21",
+		);
+
+		const adapter = mockGitHubAdapter({
+			"#10": resolvedTicket("Follow-up issue", ["bug"]),
+			"#20": resolvedTicket("First pull request", ["bug"], false, "zoe"),
+			"#21": resolvedTicket("Second pull request", ["bug"], false, "alice"),
+		});
+		const { out, runtime } = captureRuntime(repo.dir, adapter);
+		const code = await main(
+			["node", "changelog", "--output", "-", "--quiet", `${from}..HEAD`],
+			runtime,
+		);
+
+		expect(code).toBe(0);
+		const document = out.join("");
+
+		expect(document).toContain("- Follow-up issue. [#10]");
+		expect(document).not.toContain("First pull request");
+		expect(document).not.toContain("Second pull request");
+		expect(document).toContain("## :heart: Contributors\n- @alice\n- @zoe\n");
+	});
+
+	it("documents an Original pull request when no Closing or See reference exists", async () => {
+		const from = repo.commit("base");
+		repo.commit("Backport pull request\n\nOriginal pull request: #20");
+
+		const adapter = mockGitHubAdapter({
+			"#20": resolvedTicket("The pull request", ["bug"], false, "contrib"),
+		});
+		const { out, runtime } = captureRuntime(repo.dir, adapter);
+		const code = await main(
+			["node", "changelog", "--output", "-", "--quiet", `${from}..HEAD`],
+			runtime,
+		);
+
+		expect(code).toBe(0);
+		const document = out.join("");
+
+		expect(document).toContain("- The pull request. [#20]");
+		expect(document).toContain("## :heart: Contributors\n- @contrib\n");
+	});
+
+	it("does not fall back to an Original pull request entry when the See issue is missing", async () => {
+		const from = repo.commit("base");
+		repo.commit("Backport follow-up\n\nSee #10\n\nOriginal pull request: #20");
+
+		const adapter = mockGitHubAdapter({
+			"#20": resolvedTicket("The pull request", ["bug"], false, "contrib"),
+		});
+		const { out, runtime } = captureRuntime(repo.dir, adapter);
+		const code = await main(
+			["node", "changelog", "--output", "-", "--quiet", `${from}..HEAD`],
+			runtime,
+		);
+
+		expect(code).toBe(0);
+		const document = out.join("");
+
 		expect(document).not.toContain("The pull request");
 		expect(document).toContain("## :heart: Contributors\n- @contrib\n");
 	});

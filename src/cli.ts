@@ -24,6 +24,7 @@ import { fileURLToPath, pathToFileURL } from "node:url";
 import { Command, InvalidArgumentError, Option } from "commander";
 
 import { writeFileAtomically } from "./atomic-file.js";
+import { buildCommitUrl, commitSha } from "./build-info.js";
 import { hasCode, hasStringProp } from "./errors.js";
 import { gitRepoRefs } from "./git.js";
 import { defaultGitHubAdapter, type GitHubAdapterFactory } from "./github-adapter.js";
@@ -45,7 +46,10 @@ import {
 export type { GitHubAdapterFactory } from "./github-adapter.js";
 
 const require = createRequire(import.meta.url);
-const pkg = require("../package.json") as { version: string };
+const pkg = require("../package.json") as {
+	version: string;
+	repository?: { url?: string };
+};
 
 interface CliInvocation {
 	readonly range: CliRange;
@@ -138,7 +142,7 @@ function buildProgram(
 	program
 		.name("changelog")
 		.description("Generate GitHub release notes for a commit range.")
-		.version(pkg.version)
+		.version(`${pkg.version} (${commitSha})`)
 		.argument(
 			"<target>",
 			"release version to generate notes for, or the <from> of an explicit range",
@@ -304,9 +308,12 @@ async function execute(
 					diagnostic: debug,
 				});
 				const header = renderer
-					? await resolveHeaderFields(run.range, {
-							repo: run.repo,
+					? await resolveHeaderFields(run, {
 							version: pkg.version,
+							build: {
+								sha: commitSha,
+								url: buildCommitUrl(pkg.repository?.url, commitSha),
+							},
 							output: invocation.output,
 							outputUrl,
 							cwd,

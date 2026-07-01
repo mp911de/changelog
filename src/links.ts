@@ -16,8 +16,9 @@
 
 import type { RefKind } from "./git.js";
 import type { Repository } from "./github-context.js";
-import type { HeaderFields } from "./render.js";
+import type { BuildProvenance, HeaderFields } from "./render.js";
 import { targetKey, type TicketTarget } from "./ticket-references.js";
+import type { ResolvedRange } from "./version.js";
 
 const GITHUB = "https://github.com";
 
@@ -57,41 +58,50 @@ function refUrl(
 	}
 }
 
-export interface HeaderParams {
-	readonly repo: Repository;
+export function headerFields(params: {
+	readonly repository: Repository;
 	readonly version: string;
-	readonly from: string;
-	readonly to: string;
+	readonly build: BuildProvenance;
+	readonly range: ResolvedRange;
 	readonly fromKind: RefKind;
 	readonly toKind: RefKind;
 	readonly fromSha: string;
 	readonly toSha: string;
 	readonly output: string;
 	readonly outputUrl: string;
-}
-
-export function headerFields(params: HeaderParams): HeaderFields {
-	const { repo } = params;
+}): HeaderFields {
+	const { repository, range } = params;
+	const repositoryUrl = repoUrl(repository);
 	return {
-		repoName: repo.repo,
-		repoUrl: repoUrl(repo),
+		repository: { ...repository, url: repositoryUrl },
 		version: params.version,
-		repository: [{ text: `${repo.owner}/${repo.repo}`, link: repoUrl(repo) }],
+		build: params.build,
+		repositoryLine: [
+			{
+				text: `${repository.owner}/${repository.repo}`,
+				link: repositoryUrl,
+			},
+		],
 		range: [
 			{
-				text: params.from,
-				link: refUrl(repo, params.from, params.fromKind, params.fromSha),
+				text: range.from.label,
+				link: refUrl(
+					repository,
+					range.from.label,
+					params.fromKind,
+					params.fromSha,
+				),
 			},
 			{ text: ".." },
 			{
-				text: params.to,
-				link: refUrl(repo, params.to, params.toKind, params.toSha),
+				text: range.to.label,
+				link: refUrl(repository, range.to.label, params.toKind, params.toSha),
 			},
 			{ text: " (", style: "faint" },
 			{
 				text: params.toSha.slice(0, 7),
 				style: "faint",
-				link: commitUrl(repo, params.toSha),
+				link: commitUrl(repository, params.toSha),
 			},
 			{ text: ")", style: "faint" },
 		],
