@@ -22,6 +22,7 @@
 	},
 	"files": [
 		"dist",
+		"README.md",
 		"REFERENCE.adoc",
 		"SECURITY.md"
 	],
