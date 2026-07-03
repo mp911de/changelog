@@ -16,7 +16,7 @@
 
 import { describe, expect, it } from "vitest";
 
-import { buildCommitUrl, commitSha } from "../src/build-info.js";
+import { buildVersionUrl, commitSha } from "../src/build-info.js";
 
 describe("commitSha", () => {
 	it("falls back to dev in a source run", () => {
@@ -24,31 +24,26 @@ describe("commitSha", () => {
 	});
 });
 
-describe("buildCommitUrl", () => {
-	const url = "https://github.com/mp911de/changelog/commit/abc1234";
+describe("buildVersionUrl", () => {
+	const repoHttps = "git+https://github.com/mp911de/changelog.git";
+	const repoSsh = "git@github.com:mp911de/changelog.git";
 
-	it("links the tool's own commit from https and ssh repository URLs", () => {
-		expect(
-			buildCommitUrl("git+https://github.com/mp911de/changelog.git", "abc1234"),
-		).toBe(url);
-		expect(buildCommitUrl("git@github.com:mp911de/changelog.git", "abc1234")).toBe(
-			url,
-		);
+	it("links to the commit from https and ssh repository URLs when SHA is valid", () => {
+		const commitUrl = "https://github.com/mp911de/changelog/commit/abc1234";
+		expect(buildVersionUrl(repoHttps, "abc1234", "0.1.2")).toBe(commitUrl);
+		expect(buildVersionUrl(repoSsh, "abc1234", "0.1.2")).toBe(commitUrl);
 	});
 
-	it("yields no link for a fallback SHA that points at no commit", () => {
-		expect(
-			buildCommitUrl("https://github.com/mp911de/changelog", "dev"),
-		).toBeUndefined();
-		expect(
-			buildCommitUrl("https://github.com/mp911de/changelog", "unknown"),
-		).toBeUndefined();
+	it("links to the release tag when SHA is a fallback value", () => {
+		const tagUrl = "https://github.com/mp911de/changelog/releases/tag/0.1.2";
+		expect(buildVersionUrl(repoHttps, "dev", "0.1.2")).toBe(tagUrl);
+		expect(buildVersionUrl(repoHttps, "unknown", "0.1.2")).toBe(tagUrl);
 	});
 
 	it("yields no link for a missing or non-GitHub repository URL", () => {
-		expect(buildCommitUrl(undefined, "abc1234")).toBeUndefined();
+		expect(buildVersionUrl(undefined, "abc1234", "0.1.2")).toBeUndefined();
 		expect(
-			buildCommitUrl("https://gitlab.com/mp911de/changelog", "abc1234"),
+			buildVersionUrl("https://gitlab.com/mp911de/changelog", "abc1234", "0.1.2"),
 		).toBeUndefined();
 	});
 });

@@ -14,7 +14,7 @@
  * limitations under the License.
  */
 
-import { commitUrl } from "./links.js";
+import { commitUrl, repoUrl } from "./links.js";
 import { parseRemoteUrl } from "./repo-detect.js";
 
 // Replaced with a string literal by tsdown's `define` at build time (see tsdown.config.ts). The
@@ -31,19 +31,19 @@ declare const __COMMIT_SHA__: string;
 export const commitSha = typeof __COMMIT_SHA__ !== "undefined" ? __COMMIT_SHA__ : "dev";
 
 /**
- * Resolve the GitHub commit URL for {@code sha} within the changelog tool's own repository, parsed
- * from the {@code repository.url} field of package.json (e.g.
- * {@code git+https://github.com/mp911de/changelog.git}). This is the provenance of the running
- * build and is distinct from the repository a run generates notes for. Returns {@code undefined}
- * when {@code sha} is not a real commit (the {@code "dev"}/{@code "unknown"} fallbacks), when
- * {@code repositoryUrl} is absent, or when it does not parse to a {@code github.com} repository, in
- * which case the SHA renders as plain text. See {@link parseRemoteUrl} for the accepted URL forms.
+ * Resolve the best GitHub link for the running build within the changelog tool's own repository,
+ * parsed from the {@code repository.url} field of package.json (e.g.
+ * {@code git+https://github.com/mp911de/changelog.git}). Returns a commit URL when {@code sha} is
+ * a real hex SHA, a release-tag URL ({@code /releases/tag/<version>}) otherwise. Returns
+ * {@code undefined} when {@code repositoryUrl} is absent or does not parse to a
+ * {@code github.com} repository. See {@link parseRemoteUrl} for the accepted URL forms.
  */
-export function buildCommitUrl(
+export function buildVersionUrl(
 	repositoryUrl: string | undefined,
 	sha: string,
+	version: string,
 ): string | undefined {
-	if (repositoryUrl === undefined || !/^[0-9a-f]+$/i.test(sha)) {
+	if (repositoryUrl === undefined) {
 		return undefined;
 	}
 
@@ -52,5 +52,9 @@ export function buildCommitUrl(
 		return undefined;
 	}
 
-	return commitUrl(remote, sha);
+	if (/^[0-9a-f]+$/i.test(sha)) {
+		return commitUrl(remote, sha);
+	}
+
+	return repoUrl(remote, `/releases/tag/${version}`);
 }

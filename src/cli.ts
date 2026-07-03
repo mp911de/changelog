@@ -24,7 +24,7 @@ import { fileURLToPath, pathToFileURL } from "node:url";
 import { Command, InvalidArgumentError, Option } from "commander";
 
 import { writeFileAtomically } from "./atomic-file.js";
-import { buildCommitUrl, commitSha } from "./build-info.js";
+import { buildVersionUrl, commitSha } from "./build-info.js";
 import { hasCode, hasStringProp } from "./errors.js";
 import { gitRepoRefs } from "./git.js";
 import { defaultGitHubAdapter, type GitHubAdapterFactory } from "./github-adapter.js";
@@ -316,8 +316,11 @@ async function execute(
 					? await resolveHeaderFields(run, {
 							version: pkg.version,
 							build: {
-								sha: commitSha,
-								url: buildCommitUrl(pkg.repository?.url, commitSha),
+								url: buildVersionUrl(
+									pkg.repository?.url,
+									commitSha,
+									pkg.version,
+								),
 							},
 							output: invocation.output,
 							outputUrl,

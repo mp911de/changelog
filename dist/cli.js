@@ -576,21 +576,21 @@ async function gitRemoteUrl(cwd, trace) {
 * step substitutes the value) and {@code "unknown"} when the build ran without git access (a
 * tarball checkout, or git missing from PATH).
 */
-const commitSha = "b3eb5f1";
+const commitSha = "06ad4bb";
 /**
-* Resolve the GitHub commit URL for {@code sha} within the changelog tool's own repository, parsed
-* from the {@code repository.url} field of package.json (e.g.
-* {@code git+https://github.com/mp911de/changelog.git}). This is the provenance of the running
-* build and is distinct from the repository a run generates notes for. Returns {@code undefined}
-* when {@code sha} is not a real commit (the {@code "dev"}/{@code "unknown"} fallbacks), when
-* {@code repositoryUrl} is absent, or when it does not parse to a {@code github.com} repository, in
-* which case the SHA renders as plain text. See {@link parseRemoteUrl} for the accepted URL forms.
+* Resolve the best GitHub link for the running build within the changelog tool's own repository,
+* parsed from the {@code repository.url} field of package.json (e.g.
+* {@code git+https://github.com/mp911de/changelog.git}). Returns a commit URL when {@code sha} is
+* a real hex SHA, a release-tag URL ({@code /releases/tag/<version>}) otherwise. Returns
+* {@code undefined} when {@code repositoryUrl} is absent or does not parse to a
+* {@code github.com} repository. See {@link parseRemoteUrl} for the accepted URL forms.
 */
-function buildCommitUrl(repositoryUrl, sha) {
-	if (repositoryUrl === void 0 || !/^[0-9a-f]+$/i.test(sha)) return;
+function buildVersionUrl(repositoryUrl, sha, version) {
+	if (repositoryUrl === void 0) return;
 	const remote = parseRemoteUrl(repositoryUrl);
 	if (remote === void 0 || remote.host !== "github.com") return;
-	return commitUrl(remote, sha);
+	if (/^[0-9a-f]+$/i.test(sha)) return commitUrl(remote, sha);
+	return repoUrl(remote, `/releases/tag/${version}`);
 }
 //#endregion
 //#region src/github-context.ts
@@ -2249,8 +2249,7 @@ function headerBoxLines(palette, fields, color) {
 	const raw = (cells) => cells.map((cell) => sanitizeTerminalText(cell.text)).join("");
 	const repoName = sanitizeTerminalText(fields.repository.repo);
 	const version = sanitizeTerminalText(fields.version);
-	const commitSha = sanitizeTerminalText(fields.build.sha);
-	if (!color) return [`>_ ${repoName} › changelog (v${version}/${commitSha})`, ...labels.map(([label, value]) => `${label} ${raw(value)}`)];
+	if (!color) return [`>_ ${repoName} › changelog (v${version})`, ...labels.map(([label, value]) => `${label} ${raw(value)}`)];
 	const labelWidth = Math.max(...labels.map(([label]) => label.length));
 	const titleCells = [
 		{
@@ -2272,11 +2271,11 @@ function headerBoxLines(palette, fields, color) {
 			style: "bold"
 		},
 		{
-			text: ` (v${version}/`,
+			text: " (",
 			style: "faint"
 		},
 		{
-			text: commitSha,
+			text: `v${version}`,
 			style: "faint",
 			link: fields.build.url
 		},
@@ -2285,7 +2284,7 @@ function headerBoxLines(palette, fields, color) {
 			style: "faint"
 		}
 	];
-	const titleRaw = `>_ ${repoName} › changelog (v${version}/${commitSha})`;
+	const titleRaw = `>_ ${repoName} › changelog (v${version})`;
 	const rows = [{
 		rendered: renderInline(palette, titleCells),
 		width: palette.width(titleRaw)
@@ -2985,10 +2984,7 @@ async function execute(invocation, runtime) {
 				run,
 				header: renderer ? await resolveHeaderFields(run, {
 					version: pkg.version,
-					build: {
-						sha: commitSha,
-						url: buildCommitUrl(pkg.repository?.url, commitSha)
-					},
+					build: { url: buildVersionUrl(pkg.repository?.url, commitSha, pkg.version) },
 					output: invocation.output,
 					outputUrl,
 					cwd,
