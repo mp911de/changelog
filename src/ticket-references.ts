@@ -17,7 +17,11 @@
 import type { Repository } from "./github-context.js";
 
 export type ReferenceQualifier =
-	"Qualified" | "PullRequest" | "See" | "Simple" | "Related";
+	| "Qualified"
+	| "PullRequest"
+	| "See"
+	| "Simple"
+	| "Related";
 
 export interface ReferenceOccurrence {
 	readonly id: string;
