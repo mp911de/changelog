@@ -22,8 +22,13 @@ import { join } from "node:path";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 
 import { main } from "../src/cli.js";
-import { listTags, resolveBranch } from "../src/git.js";
-import { resolveAutoRange, type RepoRefs, type ResolvedBranch } from "../src/version.js";
+import { gitRepoRefs, listTags, resolveBranch, resolveRevision } from "../src/git.js";
+import {
+	resolveAutoRange,
+	resolveExplicitBound,
+	type RepoRefs,
+	type ResolvedBranch,
+} from "../src/version.js";
 
 async function captureStdout(run: () => Promise<void>): Promise<string> {
 	const chunks: string[] = [];
@@ -109,9 +114,72 @@ describe("version resolution against a real repository", () => {
 		expect(await resolveBranch("9.9.x", repo)).toBeUndefined();
 	});
 
+	it("classifies revisions through Git's own resolution", async () => {
+		const sha = execFileSync("git", ["rev-parse", "HEAD"], {
+			cwd: repo,
+			encoding: "utf8",
+		}).trim();
+
+		expect(await resolveRevision("4.0.3", repo)).toBe("tag");
+		expect(await resolveRevision("main", repo)).toBe("branch");
+		expect(await resolveRevision("HEAD", repo)).toBe("head");
+		expect(await resolveRevision(sha, repo)).toBe("commit");
+		// A remote-tracking branch does not resolve by its bare name; resolveBranch covers it.
+		expect(await resolveRevision("4.0.x", repo)).toBeUndefined();
+		expect(await resolveRevision("no-such-thing", repo)).toBeUndefined();
+	});
+
+	it("resolves a service branch input to the line's latest release and the branch tip", async () => {
+		expect(await resolveAutoRange("4.0.x", gitRepoRefs(repo))).toEqual({
+			from: { ref: "4.0.6", label: "4.0.6", kind: "tag" },
+			to: {
+				ref: "refs/remotes/origin/4.0.x",
+				label: "origin/4.0.x",
+				kind: "branch",
+			},
+		});
+	});
+
+	it("fails a local line branch that has no release yet", async () => {
+		await expect(resolveAutoRange("5.0.x", gitRepoRefs(repo))).rejects.toThrow(
+			/no release tag found on the 5\.0\.x line/,
+		);
+	});
+
+	it("resolves explicit bounds through the revision, branch, and version fallbacks", async () => {
+		const refs = gitRepoRefs(repo);
+
+		expect(await resolveExplicitBound("4.0.3", "from", refs)).toEqual({
+			ref: "4.0.3",
+			label: "4.0.3",
+			kind: "tag",
+		});
+		expect(await resolveExplicitBound("4.0.x", "to", refs)).toEqual({
+			ref: "refs/remotes/origin/4.0.x",
+			label: "origin/4.0.x",
+			kind: "branch",
+		});
+		// An untagged patch version resolves to its service branch tip, like auto mode.
+		expect(await resolveExplicitBound("4.0.7", "to", refs)).toEqual({
+			ref: "refs/remotes/origin/4.0.x",
+			label: "origin/4.0.x",
+			kind: "branch",
+		});
+		await expect(resolveExplicitBound("4.0.7", "from", refs)).rejects.toThrow(
+			/no tag matches version "4\.0\.7"/,
+		);
+	});
+
 	it("prints just the resolved previous tag for --resolve-previous", async () => {
 		const out = await captureStdout(async () => {
 			await main(["node", "changelog", "--resolve-previous", "4.0.7", "-C", repo]);
+		});
+		expect(out).toBe("4.0.6\n");
+	});
+
+	it("prints the resolved previous release for a branch input", async () => {
+		const out = await captureStdout(async () => {
+			await main(["node", "changelog", "--resolve-previous", "4.0.x", "-C", repo]);
 		});
 		expect(out).toBe("4.0.6\n");
 	});
@@ -126,6 +194,7 @@ describe("resolveAutoRange from fake repository refs", () => {
 	}): RepoRefs => ({
 		tags: async () => config.tags,
 		resolveBranch: async (name) => config.branches?.[name],
+		resolveRevision: async () => undefined,
 	});
 
 	it("resolves an upcoming patch to its predecessor and the fully-qualified branch ref", async () => {

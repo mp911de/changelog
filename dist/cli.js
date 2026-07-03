@@ -367,6 +367,17 @@ async function resolveBranch(name, cwd, trace) {
 	};
 }
 /**
+* Resolve {@code ref} as a revision using Git's own resolution rules: its {@link RefKind} when it
+* names a commit, or undefined when it does not. Git's precedence makes a tag win over a
+* same-named branch and accepts shas, revision operators ({@code HEAD~2}), and remote-tracking
+* spellings ({@code origin/4.0.x}); a bare remote branch name ({@code 4.0.x} without a local
+* branch) does not resolve here and needs {@link resolveBranch}.
+*/
+async function resolveRevision(ref, cwd, trace) {
+	if (!await refExists(ref, cwd, trace)) return;
+	return classifyRef(ref, cwd, trace);
+}
+/**
 * Classify a revision so the renderer can link it to the right GitHub page. Checks git rather than
 * the spelling of the name: a tag named like a branch (for example {@code 7.0.x}) is still a tag,
 * and a Service Branch that does not end in {@code .x} is still a branch. Covers the resolved
@@ -380,9 +391,11 @@ async function classifyRef(ref, cwd, trace) {
 	return "commit";
 }
 function gitRepoRefs(cwd, trace) {
+	let tags;
 	return {
-		tags: () => listTags(cwd, trace),
-		resolveBranch: (name) => resolveBranch(name, cwd, trace)
+		tags: () => tags ??= listTags(cwd, trace),
+		resolveBranch: (name) => resolveBranch(name, cwd, trace),
+		resolveRevision: (input) => resolveRevision(input, cwd, trace)
 	};
 }
 async function refExists(ref, cwd, trace) {
@@ -576,7 +589,7 @@ async function gitRemoteUrl(cwd, trace) {
 * step substitutes the value) and {@code "unknown"} when the build ran without git access (a
 * tarball checkout, or git missing from PATH).
 */
-const commitSha = "06ad4bb";
+const commitSha = "33331ee";
 /**
 * Resolve the best GitHub link for the running build within the changelog tool's own repository,
 * parsed from the {@code repository.url} field of package.json (e.g.
@@ -1743,9 +1756,10 @@ function compare(left, right) {
 //#endregion
 //#region src/version.ts
 /**
-* Interpret the positional arguments. A lone version is the release target (auto mode); two
+* Interpret the positional arguments. A lone argument is the release target (auto mode); two
 * arguments or a `<from>..<to>` range supply explicit bounds. Git refnames cannot contain "..", so
-* splitting on it is unambiguous; the range and a separate `to` are mutually exclusive.
+* splitting on it is unambiguous; the range and a separate `to` are mutually exclusive. What a
+* target or bound means is decided later against the repository, not here.
 */
 function parseRange(from, to) {
 	if (!from.includes("..")) {
@@ -1754,7 +1768,6 @@ function parseRange(from, to) {
 			from,
 			to
 		};
-		if (parseArtifactVersion(from) === null) throw new InvalidArgumentError(`"${from}" is not a recognized version; pass <from> <to> or a <from>..<to> range`);
 		return {
 			mode: "auto",
 			target: from
@@ -1780,23 +1793,113 @@ function tagBound(raw) {
 		kind: "tag"
 	};
 }
+function branchBound(branch) {
+	return {
+		ref: branch.ref,
+		label: branch.label,
+		kind: "branch"
+	};
+}
+const SERVICE_BRANCH_NAME = /^\d+(?:\.\d+)*\.x$/;
 /**
-* Resolve the commit range for releasing {@code input}. {@code input} must be a recognized version
-* (callers validate this up front). The upper bound is the matching tag, the Service Branch tip
-* for a patch, or HEAD for a line-opener; the lower bound is the Predecessor, which must exist.
+* Resolve the commit range for releasing {@code input}, interpreting it in order: a Service
+* Branch name releases what accumulated on that line since its latest release, and anything else
+* is read as a version — a tag spelling its own version, or a version resolved against the tags.
+* The upper bound is the matching tag, the Service Branch tip for a patch, or HEAD for a
+* line-opener; the lower bound is the Predecessor, which must exist. A revision that matches but
+* cannot infer a lower bound (a plain branch, a commit, a tag that spells no version) falls
+* through to the next interpretation and only fails when none completes.
 */
 async function resolveAutoRange(input, repo) {
+	if (SERVICE_BRANCH_NAME.test(input)) {
+		const branch = await repo.resolveBranch(input);
+		if (branch === void 0) throw new Error(`no ${input} branch found; check out the branch or pass <from> <to>`);
+		return resolveLineRange(input, branch, repo);
+	}
 	const target = parseArtifactVersion(input);
-	if (target === null) throw new Error(`"${input}" is not a recognized version`);
-	const tags = (await repo.tags()).map((raw) => parseArtifactVersion(raw)).filter((version) => version !== null);
+	if (target !== null) return resolveVersionRange(target, repo);
+	throw new Error(await describeAutoFailure(input, repo));
+}
+async function resolveVersionRange(target, repo) {
+	const tags = parseTags(await repo.tags());
 	const to = await resolveUpperBound(target, tags, repo);
 	return {
 		from: resolveLowerBound(target, tags),
 		to
 	};
 }
+/**
+* Resolve a Service Branch input: the branch tip is the upper bound and the line's latest release
+* tag the lower bound. A line without a release tag is a first release, which needs explicit
+* bounds; silently widening to another line would hide that.
+*/
+async function resolveLineRange(name, branch, repo) {
+	let highest;
+	for (const version of parseTags(await repo.tags())) {
+		if (!version.isRelease || serviceBranch(version) !== name) continue;
+		if (highest === void 0 || compareVersions(version, highest) > 0) highest = version;
+	}
+	if (highest === void 0) throw new Error(`no release tag found on the ${name} line; pass <from> <to> or a <from>..<to> range`);
+	return {
+		from: tagBound(highest.raw),
+		to: branchBound(branch)
+	};
+}
+/**
+* The most specific failure for an auto-mode input no interpretation completed: what the input
+* resolved to and why that cannot infer a lower bound, or that it resolved to nothing at all.
+*/
+async function describeAutoFailure(input, repo) {
+	const guidance = "pass <from> <to> or a <from>..<to> range";
+	const revision = await repo.resolveRevision(input);
+	if (revision === "tag") return `tag "${input}" is not a recognized version; ${guidance}`;
+	if (revision === "branch") {
+		const line = input.slice(input.indexOf("/") + 1);
+		if (SERVICE_BRANCH_NAME.test(line)) return `cannot infer a lower bound for branch "${input}"; pass its line name ${line} or an explicit <from> <to> range`;
+		return `cannot infer a lower bound for branch "${input}"; ${guidance}`;
+	}
+	if (revision !== void 0) return `cannot infer a lower bound for ${revision === "head" ? "HEAD" : `commit "${input}"`}; ${guidance}`;
+	const branch = await repo.resolveBranch(input);
+	if (branch !== void 0) return `cannot infer a lower bound for branch "${branch.label}"; ${guidance}`;
+	return `"${input}" is not a Git revision, branch, or version; ${guidance}`;
+}
+/**
+* Resolve one explicit bound, interpreting it in order: a Git revision as spelled (commit, tag,
+* branch, HEAD, or a revision expression like {@code v1.0.0~2}), a bare branch name resolved
+* against local and remote-tracking refs, and finally a version resolved through the tags. As a
+* version, the {@code to} side reuses the full auto-mode upper-bound chain (matching tag, Service
+* Branch tip, HEAD for a line-opener) while the {@code from} side must name an existing tag,
+* because an untagged version denotes no commit to scan from.
+*/
+async function resolveExplicitBound(input, side, repo) {
+	const revision = await repo.resolveRevision(input);
+	if (revision !== void 0) return {
+		ref: input,
+		label: input,
+		kind: revision
+	};
+	const branch = await repo.resolveBranch(input);
+	if (branch !== void 0) return branchBound(branch);
+	const version = parseArtifactVersion(input);
+	if (version === null || SERVICE_BRANCH_NAME.test(input)) throw new Error(`"${input}" is not a Git revision, branch, or version`);
+	const tags = parseTags(await repo.tags());
+	if (side === "to") return resolveUpperBound(version, tags, repo);
+	const tagged = taggedVersion(version, tags);
+	if (tagged === void 0) throw new Error(`no tag matches version "${input}"`);
+	return tagBound(tagged.raw);
+}
+function parseTags(raw) {
+	return raw.map((tag) => parseArtifactVersion(tag)).filter((version) => version !== null);
+}
+/**
+* The tag releasing {@code target}, preferring the exact spelling over an equivalent one
+* ({@code v4.0.5.RELEASE} for {@code 4.0.5}).
+*/
+function taggedVersion(target, tags) {
+	return tags.find((version) => version.raw === target.raw) ?? tags.find((version) => sameVersion(version, target));
+}
 async function resolveUpperBound(target, tags, repo) {
-	const tagged = tags.find((version) => version.raw === target.raw) ?? tags.find((version) => sameVersion(version, target));
+	const tagged = taggedVersion(target, tags);
 	if (tagged !== void 0) return tagBound(tagged.raw);
 	if (isLineOpener(target)) return {
 		ref: "HEAD",
@@ -1806,11 +1909,7 @@ async function resolveUpperBound(target, tags, repo) {
 	const branch = serviceBranch(target);
 	const resolved = await repo.resolveBranch(branch);
 	if (resolved === void 0) throw new Error(`no ${branch} service branch found for ${target.raw}; check out the service branch or pass <from> <to>`);
-	return {
-		ref: resolved.ref,
-		label: resolved.label,
-		kind: "branch"
-	};
+	return branchBound(resolved);
 }
 function resolveLowerBound(target, tags) {
 	const releases = tags.filter((version) => version.isRelease);
@@ -1882,22 +1981,18 @@ function previousLineOpener(target, releases) {
 //#endregion
 //#region src/prepare.ts
 /**
-* Resolve everything a run needs before scanning: the commit range (from the tags in auto mode, or
-* verbatim for an explicit range), the GitHub repository and login, the configuration, and the
-* {@link Lookup} bound to the loaded cache. Performs no header or terminal work; see
-* {@link resolveHeaderFields} for the presentation values.
+* Resolve everything a run needs before scanning: the commit range (each input interpreted in
+* order as a Git revision, a bare branch name, or a version resolved through the tags), the
+* GitHub repository and login, the configuration, and the {@link Lookup} bound to the loaded
+* cache. Performs no header or terminal work; see {@link resolveHeaderFields} for the
+* presentation values.
 */
 async function prepareRun(options) {
 	const { cwd, trace } = options;
-	const range = options.range.mode === "auto" ? await resolveAutoRange(options.range.target, gitRepoRefs(cwd, trace)) : {
-		from: {
-			ref: options.range.from,
-			label: options.range.from
-		},
-		to: {
-			ref: options.range.to,
-			label: options.range.to
-		}
+	const refs = gitRepoRefs(cwd, trace);
+	const range = options.range.mode === "auto" ? await resolveAutoRange(options.range.target, refs) : {
+		from: await resolveExplicitBound(options.range.from, "from", refs),
+		to: await resolveExplicitBound(options.range.to, "to", refs)
 	};
 	const adapter = await options.githubAdapter({
 		cwd,
@@ -1927,9 +2022,8 @@ async function prepareRun(options) {
 }
 /**
 * Build the header box fields for a resolved range. Resolves the range head sha (and the {@code from}
-* sha only when {@code from} is HEAD), and each bound's {@link RefKind} from the bound itself when
-* the range resolver already knew it (auto mode) or by classifying the ref against Git otherwise
-* (explicit mode). Called only when a header will render, so the Git work is skipped for quiet runs.
+* sha only when {@code from} is HEAD); each bound already carries its {@link RefKind} from range
+* resolution. Called only when a header will render, so the Git work is skipped for quiet runs.
 */
 async function resolveHeaderFields(run, context) {
 	const { repo, range } = run;
@@ -1937,15 +2031,13 @@ async function resolveHeaderFields(run, context) {
 	const { from, to } = range;
 	const toSha = await resolveCommit(to.ref, cwd, trace);
 	const fromSha = from.ref === "HEAD" ? from.ref === to.ref ? toSha : await resolveCommit(from.ref, cwd, trace) : "";
-	const fromKind = from.kind ?? await classifyRef(from.ref, cwd, trace);
-	const toKind = to.kind ?? await classifyRef(to.ref, cwd, trace);
 	return headerFields({
 		repository: repo,
 		version: context.version,
 		build: context.build,
 		range,
-		fromKind,
-		toKind,
+		fromKind: from.kind,
+		toKind: to.kind,
 		fromSha,
 		toSha,
 		output: context.output,
@@ -2913,7 +3005,7 @@ function buildProgram(action, options) {
 		return target;
 	};
 	const program = new Command();
-	program.name("changelog").description("Generate GitHub release notes for a commit range.").version(`${pkg.version} (${commitSha})`).argument("<target>", "release version to generate notes for, or the <from> of an explicit range").argument("[to]", "explicit upper bound; supplying it treats <target> as the <from> lower bound").option("-C <directory>", "run as if started in the given directory", parseDirectory).option("-O, --output <file>", "output file, or - for stdout", "release-notes.md").option("--all", "collect unclassified issues under an Other Changes section", false).option("--refresh", "force re-fetch and overwrite cached tickets", false).option("--show-missing", "list only commits without ticket reference", false).option("--show-commits", "list every scanned commit", false).option("--show-all", "list every commit and every looked-up ticket outcome", false).option("--repo <owner/repo>", "override the auto-detected repository").option("--resolve-previous", "print the resolved previous version tag and exit", false).addOption(new Option("--debug", "trace the git and GitHub calls being made").default(false).conflicts("quiet")).option("-q, --quiet", "suppress all output except errors", false).action(async (target, to, opts) => {
+	program.name("changelog").description("Generate GitHub release notes for a commit range.").version(`${pkg.version} (${commitSha})`).argument("<target>", "release version, tag, or maintenance branch (X.Y.x) to generate notes for, or the <from> of an explicit range").argument("[to]", "explicit upper bound; supplying it treats <target> as the <from> lower bound").option("-C <directory>", "run as if started in the given directory", parseDirectory).option("-O, --output <file>", "output file, or - for stdout", "release-notes.md").option("--all", "collect unclassified issues under an Other Changes section", false).option("--refresh", "force re-fetch and overwrite cached tickets", false).option("--show-missing", "list only commits without ticket reference", false).option("--show-commits", "list every scanned commit", false).option("--show-all", "list every commit and every looked-up ticket outcome", false).option("--repo <owner/repo>", "override the auto-detected repository").option("--resolve-previous", "print the resolved previous version tag and exit", false).addOption(new Option("--debug", "trace the git and GitHub calls being made").default(false).conflicts("quiet")).option("-q, --quiet", "suppress all output except errors", false).action(async (target, to, opts) => {
 		await action(toInvocation(target, to, opts, invocationDirectory));
 	});
 	return program;

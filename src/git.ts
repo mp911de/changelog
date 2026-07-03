@@ -139,6 +139,24 @@ export async function resolveBranch(
 }
 
 /**
+ * Resolve {@code ref} as a revision using Git's own resolution rules: its {@link RefKind} when it
+ * names a commit, or undefined when it does not. Git's precedence makes a tag win over a
+ * same-named branch and accepts shas, revision operators ({@code HEAD~2}), and remote-tracking
+ * spellings ({@code origin/4.0.x}); a bare remote branch name ({@code 4.0.x} without a local
+ * branch) does not resolve here and needs {@link resolveBranch}.
+ */
+export async function resolveRevision(
+	ref: string,
+	cwd: string,
+	trace?: Trace,
+): Promise<RefKind | undefined> {
+	if (!(await refExists(ref, cwd, trace))) {
+		return undefined;
+	}
+	return classifyRef(ref, cwd, trace);
+}
+
+/**
  * Classify a revision so the renderer can link it to the right GitHub page. Checks git rather than
  * the spelling of the name: a tag named like a branch (for example {@code 7.0.x}) is still a tag,
  * and a Service Branch that does not end in {@code .x} is still a branch. Covers the resolved
@@ -166,9 +184,12 @@ export async function classifyRef(
 }
 
 export function gitRepoRefs(cwd: string, trace?: Trace): RepoRefs {
+	// Both bounds of an explicit range may fall back to the tags; list them once per run.
+	let tags: Promise<string[]> | undefined;
 	return {
-		tags: () => listTags(cwd, trace),
+		tags: () => (tags ??= listTags(cwd, trace)),
 		resolveBranch: (name) => resolveBranch(name, cwd, trace),
+		resolveRevision: (input) => resolveRevision(input, cwd, trace),
 	};
 }
 

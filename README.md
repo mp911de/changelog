@@ -36,8 +36,10 @@ changelog [options] <from>..<to>
 
 With a single release version, Changelog Tool resolves the previous release tag and the appropriate upper bound automatically.
 Supported versions include SemVer and common Spring-style forms such as `4.0`, `v4.0.0`, `4.0.0.RELEASE`, `4.0.0.Final`, `4.0.0.RC1`, and `4.0.0.SR1`.
+A tag name releases the version it spells, and a maintenance-branch name (`4.0.x`) releases the changes accumulated on its line since the line's latest release.
 
 An explicit range may instead be given as two arguments or in Git's two-dot notation.
+Each bound is resolved in order as a Git revision, a branch on any remote, or a version matched against the tags across spellings (`4.0.0` selects a `v4.0.0.RELEASE` tag).
 The `from` revision is excluded and the `to` revision is included.
 For example, `changelog 4.0.0..4.0.4` is equivalent to `changelog 4.0.0 4.0.4`.
 Release notes are written to `release-notes.md` by default.
@@ -56,8 +58,8 @@ Usage: changelog [options] <target> [to]
 Generate GitHub release notes for a commit range.
 
 Arguments:
-  target               release version to generate notes for, or the <from> of an explicit
-                       range
+  target               release version, tag, or maintenance branch (X.Y.x) to
+                       generate notes for, or the <from> of an explicit range
   to                   explicit upper bound; supplying it treats <target> as the <from>
                        lower bound
 

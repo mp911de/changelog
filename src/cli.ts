@@ -149,7 +149,7 @@ function buildProgram(
 		.version(`${pkg.version} (${commitSha})`)
 		.argument(
 			"<target>",
-			"release version to generate notes for, or the <from> of an explicit range",
+			"release version, tag, or maintenance branch (X.Y.x) to generate notes for, or the <from> of an explicit range",
 		)
 		.argument(
 			"[to]",

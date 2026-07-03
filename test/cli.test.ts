@@ -167,11 +167,40 @@ describe("main argument parsing", () => {
 		expect(err.join("")).toMatch(/specify the range once/);
 	});
 
-	it("returns 2 for a lone target that is not a recognized Artifact Version", async () => {
-		const { err, runtime } = captureRuntime();
-		const code = await main(["node", "changelog", "main"], runtime);
-		expect(code).toBe(2);
-		expect(err.join("")).toMatch(/not a recognized version/);
+	it("returns 1 for a lone branch target that cannot infer a lower bound", async () => {
+		const repo = FixtureRepo.create();
+		try {
+			repo.commit("first");
+			const { err, runtime } = captureRuntime();
+			const code = await main(
+				["node", "changelog", "main", "-C", repo.dir],
+				runtime,
+			);
+			expect(code).toBe(1);
+			expect(stripAnsi(err.join(""))).toMatch(
+				/cannot infer a lower bound for branch "main"/,
+			);
+		} finally {
+			repo.cleanup();
+		}
+	});
+
+	it("returns 1 for a lone target that resolves to nothing", async () => {
+		const repo = FixtureRepo.create();
+		try {
+			repo.commit("first");
+			const { err, runtime } = captureRuntime();
+			const code = await main(
+				["node", "changelog", "no-such-thing", "-C", repo.dir],
+				runtime,
+			);
+			expect(code).toBe(1);
+			expect(stripAnsi(err.join(""))).toMatch(
+				/"no-such-thing" is not a Git revision, branch, or version/,
+			);
+		} finally {
+			repo.cleanup();
+		}
 	});
 
 	it("returns 2 when --quiet and --debug are combined", async () => {
@@ -232,14 +261,20 @@ describe("main argument parsing", () => {
 });
 
 describe("main run-level", () => {
+	let runRepo: FixtureRepo;
 	let runDir: string;
 
 	beforeEach(() => {
-		runDir = mkdtempSync(join(tmpdir(), "changelog-run-"));
+		// The per-test run directory is itself a small repository: explicit bounds resolve
+		// against Git even when scanning is stubbed, so "base..HEAD" must name real refs.
+		runRepo = FixtureRepo.create();
+		runRepo.commit("base");
+		runRepo.git("tag", "base");
+		runDir = runRepo.dir;
 	});
 
 	afterEach(() => {
-		rmSync(runDir, { recursive: true, force: true });
+		runRepo.cleanup();
 	});
 
 	// One immutable repository with a fixed topology, built once (memoized, so scan-injected
@@ -488,7 +523,7 @@ describe("main run-level", () => {
 		expect(err.join("")).not.toMatch(/^\s+at .+:\d+:\d+/m);
 	});
 
-	it("lets git log validate an explicit Git range during scanning", async () => {
+	it("validates an explicit range during preparation, before GitHub is consulted", async () => {
 		const { repo } = topology();
 		let adapterCalls = 0;
 		const adapter: GitHubAdapterFactory = async () => {
@@ -503,8 +538,10 @@ describe("main run-level", () => {
 		);
 
 		expect(code).toBe(1);
-		expect(adapterCalls).toBe(1);
-		expect(err.join("")).toContain("git log failed");
+		expect(adapterCalls).toBe(0);
+		expect(err.join("")).toContain(
+			'"bad-from" is not a Git revision, branch, or version',
+		);
 	});
 
 	it("includes a stack trace on runtime failure when --debug is active", async () => {

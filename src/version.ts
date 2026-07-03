@@ -36,28 +36,24 @@ import {
 import type { RefKind } from "./git.js";
 
 /**
- * A lone version is the release target (auto mode); the lower bound is resolved from tags and the
- * upper bound is the matching tag or HEAD. Two arguments or a `<from>..<to>` range supply both
- * bounds explicitly.
+ * A lone argument is the release target (auto mode): a version, tag, or Service Branch resolved
+ * against the repository by {@link resolveAutoRange}. Two arguments or a `<from>..<to>` range
+ * supply both bounds explicitly.
  */
 export type CliRange =
 	| { readonly mode: "auto"; readonly target: string }
 	| { readonly mode: "explicit"; readonly from: string; readonly to: string };
 
 /**
- * Interpret the positional arguments. A lone version is the release target (auto mode); two
+ * Interpret the positional arguments. A lone argument is the release target (auto mode); two
  * arguments or a `<from>..<to>` range supply explicit bounds. Git refnames cannot contain "..", so
- * splitting on it is unambiguous; the range and a separate `to` are mutually exclusive.
+ * splitting on it is unambiguous; the range and a separate `to` are mutually exclusive. What a
+ * target or bound means is decided later against the repository, not here.
  */
 export function parseRange(from: string, to: string | undefined): CliRange {
 	if (!from.includes("..")) {
 		if (to !== undefined) {
 			return { mode: "explicit", from, to };
-		}
-		if (parseArtifactVersion(from) === null) {
-			throw new InvalidArgumentError(
-				`"${from}" is not a recognized version; pass <from> <to> or a <from>..<to> range`,
-			);
 		}
 		return { mode: "auto", target: from };
 	}
@@ -99,7 +95,8 @@ export interface ResolvedBranch {
 }
 
 /**
- * Supplies the repository's refs to {@link resolveAutoRange}, isolating it from Git.
+ * Supplies the repository's refs to {@link resolveAutoRange} and {@link resolveExplicitBound},
+ * isolating them from Git.
  */
 export interface RepoRefs {
 	/**
@@ -111,18 +108,24 @@ export interface RepoRefs {
 	 * Resolve a Service Branch name to a usable revision (local or remote-tracking), or undefined.
 	 */
 	resolveBranch(name: string): Promise<ResolvedBranch | undefined>;
+
+	/**
+	 * Resolve {@code input} as a Git revision using Git's own resolution rules: its
+	 * {@link RefKind} when it names a commit, or undefined when it does not.
+	 */
+	resolveRevision(input: string): Promise<RefKind | undefined>;
 }
 
 /**
  * One end of a resolved commit range. {@link ref} is the unambiguous revision passed to Git;
- * {@link label} is its display spelling; {@link kind} is its git-resolved {@link RefKind} when the
- * resolver already knows it (always in auto mode), and {@code undefined} for an explicit bound whose
- * kind the caller classifies only when a header will render it.
+ * {@link label} is its display spelling — the normalized form when the bound was resolved through
+ * a fallback (the matched tag for a version, `origin/4.0.x` for a bare branch name); {@link kind}
+ * is its git-resolved {@link RefKind}.
  */
 export interface ResolvedBound {
 	readonly ref: string;
 	readonly label: string;
-	readonly kind?: RefKind;
+	readonly kind: RefKind;
 }
 
 export interface ResolvedRange {
@@ -134,27 +137,164 @@ function tagBound(raw: string): ResolvedBound {
 	return { ref: raw, label: raw, kind: "tag" };
 }
 
+function branchBound(branch: ResolvedBranch): ResolvedBound {
+	return { ref: branch.ref, label: branch.label, kind: "branch" };
+}
+
+// A Service Branch name (4.0.x, or deeper lines like 4.0.1.x) always denotes a branch, never a
+// version: "4.0.x" would otherwise parse as version 4.0 with an unknown "x" qualifier.
+const SERVICE_BRANCH_NAME = /^\d+(?:\.\d+)*\.x$/;
+
 /**
- * Resolve the commit range for releasing {@code input}. {@code input} must be a recognized version
- * (callers validate this up front). The upper bound is the matching tag, the Service Branch tip
- * for a patch, or HEAD for a line-opener; the lower bound is the Predecessor, which must exist.
+ * Resolve the commit range for releasing {@code input}, interpreting it in order: a Service
+ * Branch name releases what accumulated on that line since its latest release, and anything else
+ * is read as a version — a tag spelling its own version, or a version resolved against the tags.
+ * The upper bound is the matching tag, the Service Branch tip for a patch, or HEAD for a
+ * line-opener; the lower bound is the Predecessor, which must exist. A revision that matches but
+ * cannot infer a lower bound (a plain branch, a commit, a tag that spells no version) falls
+ * through to the next interpretation and only fails when none completes.
  */
 export async function resolveAutoRange(
 	input: string,
 	repo: RepoRefs,
 ): Promise<ResolvedRange> {
-	const target = parseArtifactVersion(input);
-	if (target === null) {
-		throw new Error(`"${input}" is not a recognized version`);
+	if (SERVICE_BRANCH_NAME.test(input)) {
+		const branch = await repo.resolveBranch(input);
+		if (branch === undefined) {
+			throw new Error(
+				`no ${input} branch found; check out the branch or pass <from> <to>`,
+			);
+		}
+		return resolveLineRange(input, branch, repo);
 	}
 
-	const tags = (await repo.tags())
-		.map((raw) => parseArtifactVersion(raw))
-		.filter((version): version is ArtifactVersion => version !== null);
+	const target = parseArtifactVersion(input);
+	if (target !== null) {
+		return resolveVersionRange(target, repo);
+	}
+	throw new Error(await describeAutoFailure(input, repo));
+}
 
+async function resolveVersionRange(
+	target: ArtifactVersion,
+	repo: RepoRefs,
+): Promise<ResolvedRange> {
+	const tags = parseTags(await repo.tags());
 	const to = await resolveUpperBound(target, tags, repo);
 	const from = resolveLowerBound(target, tags);
 	return { from, to };
+}
+
+/**
+ * Resolve a Service Branch input: the branch tip is the upper bound and the line's latest release
+ * tag the lower bound. A line without a release tag is a first release, which needs explicit
+ * bounds; silently widening to another line would hide that.
+ */
+async function resolveLineRange(
+	name: string,
+	branch: ResolvedBranch,
+	repo: RepoRefs,
+): Promise<ResolvedRange> {
+	let highest: ArtifactVersion | undefined;
+	for (const version of parseTags(await repo.tags())) {
+		if (!version.isRelease || serviceBranch(version) !== name) {
+			continue;
+		}
+		if (highest === undefined || compareVersions(version, highest) > 0) {
+			highest = version;
+		}
+	}
+	if (highest === undefined) {
+		throw new Error(
+			`no release tag found on the ${name} line; pass <from> <to> or a <from>..<to> range`,
+		);
+	}
+	return { from: tagBound(highest.raw), to: branchBound(branch) };
+}
+
+/**
+ * The most specific failure for an auto-mode input no interpretation completed: what the input
+ * resolved to and why that cannot infer a lower bound, or that it resolved to nothing at all.
+ */
+async function describeAutoFailure(input: string, repo: RepoRefs): Promise<string> {
+	const guidance = "pass <from> <to> or a <from>..<to> range";
+	const revision = await repo.resolveRevision(input);
+	if (revision === "tag") {
+		return `tag "${input}" is not a recognized version; ${guidance}`;
+	}
+	if (revision === "branch") {
+		// A remote-tracking spelling of a Service Branch carries its line name after the remote.
+		const line = input.slice(input.indexOf("/") + 1);
+		if (SERVICE_BRANCH_NAME.test(line)) {
+			return `cannot infer a lower bound for branch "${input}"; pass its line name ${line} or an explicit <from> <to> range`;
+		}
+		return `cannot infer a lower bound for branch "${input}"; ${guidance}`;
+	}
+	if (revision !== undefined) {
+		const subject = revision === "head" ? "HEAD" : `commit "${input}"`;
+		return `cannot infer a lower bound for ${subject}; ${guidance}`;
+	}
+	const branch = await repo.resolveBranch(input);
+	if (branch !== undefined) {
+		return `cannot infer a lower bound for branch "${branch.label}"; ${guidance}`;
+	}
+	return `"${input}" is not a Git revision, branch, or version; ${guidance}`;
+}
+
+/**
+ * Resolve one explicit bound, interpreting it in order: a Git revision as spelled (commit, tag,
+ * branch, HEAD, or a revision expression like {@code v1.0.0~2}), a bare branch name resolved
+ * against local and remote-tracking refs, and finally a version resolved through the tags. As a
+ * version, the {@code to} side reuses the full auto-mode upper-bound chain (matching tag, Service
+ * Branch tip, HEAD for a line-opener) while the {@code from} side must name an existing tag,
+ * because an untagged version denotes no commit to scan from.
+ */
+export async function resolveExplicitBound(
+	input: string,
+	side: "from" | "to",
+	repo: RepoRefs,
+): Promise<ResolvedBound> {
+	const revision = await repo.resolveRevision(input);
+	if (revision !== undefined) {
+		return { ref: input, label: input, kind: revision };
+	}
+	const branch = await repo.resolveBranch(input);
+	if (branch !== undefined) {
+		return branchBound(branch);
+	}
+	const version = parseArtifactVersion(input);
+	if (version === null || SERVICE_BRANCH_NAME.test(input)) {
+		throw new Error(`"${input}" is not a Git revision, branch, or version`);
+	}
+	const tags = parseTags(await repo.tags());
+	if (side === "to") {
+		return resolveUpperBound(version, tags, repo);
+	}
+	const tagged = taggedVersion(version, tags);
+	if (tagged === undefined) {
+		throw new Error(`no tag matches version "${input}"`);
+	}
+	return tagBound(tagged.raw);
+}
+
+function parseTags(raw: readonly string[]): ArtifactVersion[] {
+	return raw
+		.map((tag) => parseArtifactVersion(tag))
+		.filter((version): version is ArtifactVersion => version !== null);
+}
+
+/**
+ * The tag releasing {@code target}, preferring the exact spelling over an equivalent one
+ * ({@code v4.0.5.RELEASE} for {@code 4.0.5}).
+ */
+function taggedVersion(
+	target: ArtifactVersion,
+	tags: readonly ArtifactVersion[],
+): ArtifactVersion | undefined {
+	return (
+		tags.find((version) => version.raw === target.raw) ??
+		tags.find((version) => sameVersion(version, target))
+	);
 }
 
 async function resolveUpperBound(
@@ -163,9 +303,7 @@ async function resolveUpperBound(
 	repo: RepoRefs,
 ): Promise<ResolvedBound> {
 	// A tag for this exact version means it is already released: regenerate against that tag.
-	const tagged =
-		tags.find((version) => version.raw === target.raw) ??
-		tags.find((version) => sameVersion(version, target));
+	const tagged = taggedVersion(target, tags);
 	if (tagged !== undefined) {
 		return tagBound(tagged.raw);
 	}
@@ -180,7 +318,7 @@ async function resolveUpperBound(
 			`no ${branch} service branch found for ${target.raw}; check out the service branch or pass <from> <to>`,
 		);
 	}
-	return { ref: resolved.ref, label: resolved.label, kind: "branch" };
+	return branchBound(resolved);
 }
 
 interface LowerBound {

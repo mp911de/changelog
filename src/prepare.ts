@@ -16,13 +16,18 @@
 
 import { loadCache } from "./cache.js";
 import { type ChangelogConfig, loadOrCreateConfig } from "./config.js";
-import { classifyRef, gitRepoRefs, resolveCommit } from "./git.js";
+import { gitRepoRefs, resolveCommit } from "./git.js";
 import type { GitHubAdapterFactory } from "./github-adapter.js";
 import type { Repository } from "./github-context.js";
 import { headerFields } from "./links.js";
 import type { Lookup } from "./pipeline.js";
 import type { BuildProvenance, HeaderFields } from "./render.js";
-import { type CliRange, resolveAutoRange, type ResolvedRange } from "./version.js";
+import {
+	type CliRange,
+	resolveAutoRange,
+	resolveExplicitBound,
+	type ResolvedRange,
+} from "./version.js";
 
 /**
  * The dependencies a single preparation needs. {@code trace} is the {@code --debug}-gated Git/GitHub
@@ -47,19 +52,21 @@ export interface PreparedRun {
 }
 
 /**
- * Resolve everything a run needs before scanning: the commit range (from the tags in auto mode, or
- * verbatim for an explicit range), the GitHub repository and login, the configuration, and the
- * {@link Lookup} bound to the loaded cache. Performs no header or terminal work; see
- * {@link resolveHeaderFields} for the presentation values.
+ * Resolve everything a run needs before scanning: the commit range (each input interpreted in
+ * order as a Git revision, a bare branch name, or a version resolved through the tags), the
+ * GitHub repository and login, the configuration, and the {@link Lookup} bound to the loaded
+ * cache. Performs no header or terminal work; see {@link resolveHeaderFields} for the
+ * presentation values.
  */
 export async function prepareRun(options: PrepareRunOptions): Promise<PreparedRun> {
 	const { cwd, trace } = options;
+	const refs = gitRepoRefs(cwd, trace);
 	const range: ResolvedRange =
 		options.range.mode === "auto"
-			? await resolveAutoRange(options.range.target, gitRepoRefs(cwd, trace))
+			? await resolveAutoRange(options.range.target, refs)
 			: {
-					from: { ref: options.range.from, label: options.range.from },
-					to: { ref: options.range.to, label: options.range.to },
+					from: await resolveExplicitBound(options.range.from, "from", refs),
+					to: await resolveExplicitBound(options.range.to, "to", refs),
 				};
 
 	const adapter = await options.githubAdapter({
@@ -93,9 +100,8 @@ export interface HeaderContext {
 
 /**
  * Build the header box fields for a resolved range. Resolves the range head sha (and the {@code from}
- * sha only when {@code from} is HEAD), and each bound's {@link RefKind} from the bound itself when
- * the range resolver already knew it (auto mode) or by classifying the ref against Git otherwise
- * (explicit mode). Called only when a header will render, so the Git work is skipped for quiet runs.
+ * sha only when {@code from} is HEAD); each bound already carries its {@link RefKind} from range
+ * resolution. Called only when a header will render, so the Git work is skipped for quiet runs.
  */
 export async function resolveHeaderFields(
 	run: Pick<PreparedRun, "repo" | "range">,
@@ -112,16 +118,14 @@ export async function resolveHeaderFields(
 				? toSha
 				: await resolveCommit(from.ref, cwd, trace)
 			: "";
-	const fromKind = from.kind ?? (await classifyRef(from.ref, cwd, trace));
-	const toKind = to.kind ?? (await classifyRef(to.ref, cwd, trace));
 
 	return headerFields({
 		repository: repo,
 		version: context.version,
 		build: context.build,
 		range,
-		fromKind,
-		toKind,
+		fromKind: from.kind,
+		toKind: to.kind,
 		fromSha,
 		toSha,
 		output: context.output,

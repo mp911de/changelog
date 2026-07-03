@@ -48,6 +48,10 @@ describe("prepareRun", () => {
 			},
 		});
 
+		fixture.commit("first");
+		fixture.git("tag", "1.0.0");
+		fixture.commit("second");
+
 		const run = await prepareRun({
 			range: { mode: "explicit", from: "1.0.0", to: "HEAD" },
 			cwd: fixture.dir,
@@ -57,10 +61,10 @@ describe("prepareRun", () => {
 		});
 
 		expect(run.repo).toEqual({ owner: "octo", repo: "tools" });
-		// An explicit bound carries no kind; only the ref and label.
+		// Each explicit bound carries its git-resolved kind from range resolution.
 		expect(run.range).toEqual({
-			from: { ref: "1.0.0", label: "1.0.0" },
-			to: { ref: "HEAD", label: "HEAD" },
+			from: { ref: "1.0.0", label: "1.0.0", kind: "tag" },
+			to: { ref: "HEAD", label: "HEAD", kind: "head" },
 		});
 		expect(createLookupArgs?.refresh).toBe(true);
 		expect(typeof run.lookup).toBe("function");
@@ -85,8 +89,10 @@ describe("prepareRun", () => {
 			};
 		};
 
+		fixture.commit("first");
+
 		await prepareRun({
-			range: { mode: "explicit", from: "a", to: "b" },
+			range: { mode: "explicit", from: "HEAD", to: "HEAD" },
 			cwd: fixture.dir,
 			repoOverride: "owner/name",
 			refresh: false,
@@ -100,7 +106,8 @@ describe("prepareRun", () => {
 			repoOverride: "owner/name",
 			traced: true,
 		});
-		expect(lines).toEqual(["hello"]);
+		// Bound resolution traces its git calls before the adapter's own line.
+		expect(lines).toContain("hello");
 	});
 });
 
@@ -130,7 +137,7 @@ describe("resolveHeaderFields", () => {
 			},
 			{
 				version: "9.9.9",
-				build: { sha: "abc1234" },
+				build: {},
 				output: "notes.md",
 				outputUrl: "file:///notes.md",
 				cwd: fixture.dir,
@@ -149,7 +156,7 @@ describe("resolveHeaderFields", () => {
 		expect(header.range[4]?.text).toBe(head.slice(0, 7));
 	});
 
-	it("classifies an explicit bound that carries no kind as a commit", async () => {
+	it("links commit bounds to their commit pages", async () => {
 		const first = fixture.commit("first");
 		const second = fixture.commit("second");
 
@@ -157,13 +164,13 @@ describe("resolveHeaderFields", () => {
 			{
 				repo: { owner: "o", repo: "r" },
 				range: {
-					from: { ref: first, label: first },
-					to: { ref: second, label: second },
+					from: { ref: first, label: first, kind: "commit" },
+					to: { ref: second, label: second, kind: "commit" },
 				},
 			},
 			{
 				version: "1",
-				build: { sha: "abc1234" },
+				build: {},
 				output: "n.md",
 				outputUrl: "",
 				cwd: fixture.dir,

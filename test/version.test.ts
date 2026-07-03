@@ -16,12 +16,18 @@
 
 import { describe, expect, it } from "vitest";
 
-import { type RepoRefs, resolveAutoRange, type ResolvedRange } from "../src/version.js";
+import {
+	type RepoRefs,
+	resolveAutoRange,
+	resolveExplicitBound,
+	type ResolvedRange,
+} from "../src/version.js";
 
 function repo(overrides: Partial<RepoRefs>): RepoRefs {
 	return {
 		tags: async () => [],
 		resolveBranch: async () => undefined,
+		resolveRevision: async () => undefined,
 		...overrides,
 	};
 }
@@ -335,5 +341,224 @@ describe("resolveAutoRange", () => {
 			from: "4.0.0",
 			to: "4.0.0.SR1",
 		});
+	});
+});
+
+describe("resolveAutoRange ordered input resolution", () => {
+	it("resolves a service branch input from the line's latest release to the branch tip", async () => {
+		const refs = repo({
+			tags: async () => ["v4.0.5.RELEASE", "v4.0.6.RELEASE", "4.1.0", "4.0.7-M1"],
+			resolveBranch: branch("origin/4.0.x"),
+		});
+
+		const { from, to } = await resolveAutoRange("4.0.x", refs);
+		expect(from).toEqual({
+			ref: "v4.0.6.RELEASE",
+			label: "v4.0.6.RELEASE",
+			kind: "tag",
+		});
+		expect(to).toEqual({
+			ref: "origin/4.0.x",
+			label: "origin/4.0.x",
+			kind: "branch",
+		});
+	});
+
+	it("resolves a deeper line branch by its full line name", async () => {
+		const refs = repo({
+			tags: async () => ["4.0.1.1", "4.0.1.2", "4.0.2.1"],
+			resolveBranch: async (name) =>
+				name === "4.0.1.x" ? { ref: "4.0.1.x", label: "4.0.1.x" } : undefined,
+		});
+
+		expect(range(await resolveAutoRange("4.0.1.x", refs))).toEqual({
+			from: "4.0.1.2",
+			to: "4.0.1.x",
+		});
+	});
+
+	it("fails when a line branch has no release tag yet", async () => {
+		const refs = repo({
+			tags: async () => ["4.0.7-M1", "3.9.0"],
+			resolveBranch: branch("origin/4.0.x"),
+		});
+
+		await expect(resolveAutoRange("4.0.x", refs)).rejects.toThrow(
+			/no release tag found on the 4\.0\.x line/,
+		);
+	});
+
+	it("fails when a line branch does not exist anywhere", async () => {
+		await expect(resolveAutoRange("9.9.x", repo({}))).rejects.toThrow(
+			/no 9\.9\.x branch found/,
+		);
+	});
+
+	it("falls through to the version when a branch shadows a version spelling", async () => {
+		const refs = repo({
+			tags: async () => ["v4.0.5.RELEASE", "v4.0.6.RELEASE"],
+			resolveBranch: branch("origin/4.0.x"),
+			resolveRevision: async (input) => (input === "4.0.7" ? "branch" : undefined),
+		});
+
+		expect(range(await resolveAutoRange("4.0.7", refs))).toEqual({
+			from: "v4.0.6.RELEASE",
+			to: "origin/4.0.x",
+		});
+	});
+
+	it("fails for a tag whose name is not a version", async () => {
+		const refs = repo({ resolveRevision: async () => "tag" });
+
+		await expect(resolveAutoRange("release-2024", refs)).rejects.toThrow(
+			/tag "release-2024" is not a recognized version/,
+		);
+	});
+
+	it("fails for a branch that cannot infer a lower bound", async () => {
+		const refs = repo({ resolveRevision: async () => "branch" });
+
+		await expect(resolveAutoRange("main", refs)).rejects.toThrow(
+			/cannot infer a lower bound for branch "main"/,
+		);
+	});
+
+	it("points a remote-tracking line spelling at its line name", async () => {
+		const refs = repo({ resolveRevision: async () => "branch" });
+
+		await expect(resolveAutoRange("origin/4.0.x", refs)).rejects.toThrow(
+			/pass its line name 4\.0\.x/,
+		);
+	});
+
+	it("fails for commit and HEAD inputs", async () => {
+		const commits = repo({ resolveRevision: async () => "commit" });
+		await expect(resolveAutoRange("282f9c3", commits)).rejects.toThrow(
+			/cannot infer a lower bound for commit "282f9c3"/,
+		);
+
+		const head = repo({ resolveRevision: async () => "head" });
+		await expect(resolveAutoRange("HEAD", head)).rejects.toThrow(
+			/cannot infer a lower bound for HEAD/,
+		);
+	});
+
+	it("names the remote-tracking branch when only a bare branch name matches", async () => {
+		const refs = repo({
+			resolveBranch: async () => ({
+				ref: "refs/remotes/origin/develop",
+				label: "origin/develop",
+			}),
+		});
+
+		await expect(resolveAutoRange("develop", refs)).rejects.toThrow(
+			/cannot infer a lower bound for branch "origin\/develop"/,
+		);
+	});
+
+	it("fails an input that is neither a revision, branch, nor version", async () => {
+		await expect(resolveAutoRange("no-such-thing", repo({}))).rejects.toThrow(
+			/"no-such-thing" is not a Git revision, branch, or version/,
+		);
+	});
+});
+
+describe("resolveExplicitBound", () => {
+	const TAGS = ["v4.0.4.RELEASE", "v4.0.5.RELEASE"];
+
+	it("passes a resolvable revision through with its kind", async () => {
+		const refs = repo({
+			resolveRevision: async (input) => (input === "HEAD~2" ? "commit" : undefined),
+		});
+
+		expect(await resolveExplicitBound("HEAD~2", "from", refs)).toEqual({
+			ref: "HEAD~2",
+			label: "HEAD~2",
+			kind: "commit",
+		});
+	});
+
+	it("resolves a bare branch name to its remote-tracking ref", async () => {
+		const refs = repo({
+			resolveBranch: async (name) =>
+				name === "4.0.x"
+					? { ref: "refs/remotes/origin/4.0.x", label: "origin/4.0.x" }
+					: undefined,
+		});
+
+		expect(await resolveExplicitBound("4.0.x", "to", refs)).toEqual({
+			ref: "refs/remotes/origin/4.0.x",
+			label: "origin/4.0.x",
+			kind: "branch",
+		});
+	});
+
+	it("resolves a version bound to its tag spelling on both sides", async () => {
+		const refs = repo({ tags: async () => TAGS });
+
+		expect(await resolveExplicitBound("4.0.5", "from", refs)).toEqual({
+			ref: "v4.0.5.RELEASE",
+			label: "v4.0.5.RELEASE",
+			kind: "tag",
+		});
+		expect(await resolveExplicitBound("4.0.5", "to", refs)).toEqual({
+			ref: "v4.0.5.RELEASE",
+			label: "v4.0.5.RELEASE",
+			kind: "tag",
+		});
+	});
+
+	it("resolves an untagged patch to-bound to the service branch tip", async () => {
+		const refs = repo({
+			tags: async () => TAGS,
+			resolveBranch: branch("origin/4.0.x"),
+		});
+
+		expect(await resolveExplicitBound("4.0.6", "to", refs)).toEqual({
+			ref: "origin/4.0.x",
+			label: "origin/4.0.x",
+			kind: "branch",
+		});
+	});
+
+	it("resolves an untagged line-opener to-bound to HEAD", async () => {
+		const refs = repo({ tags: async () => TAGS });
+
+		expect(await resolveExplicitBound("4.1.0", "to", refs)).toEqual({
+			ref: "HEAD",
+			label: "HEAD",
+			kind: "head",
+		});
+	});
+
+	it("fails an untagged patch to-bound without its service branch", async () => {
+		const refs = repo({ tags: async () => TAGS });
+
+		await expect(resolveExplicitBound("4.0.6", "to", refs)).rejects.toThrow(
+			/no 4\.0\.x service branch found for 4\.0\.6/,
+		);
+	});
+
+	it("fails an untagged from-bound version", async () => {
+		const refs = repo({
+			tags: async () => TAGS,
+			resolveBranch: branch("origin/4.0.x"),
+		});
+
+		await expect(resolveExplicitBound("4.0.6", "from", refs)).rejects.toThrow(
+			/no tag matches version "4\.0\.6"/,
+		);
+	});
+
+	it("fails a bound that is neither a revision, branch, nor version", async () => {
+		await expect(
+			resolveExplicitBound("no-such-thing", "to", repo({})),
+		).rejects.toThrow(/"no-such-thing" is not a Git revision, branch, or version/);
+	});
+
+	it("treats an unresolvable line name as a branch, not a version", async () => {
+		await expect(resolveExplicitBound("9.9.x", "to", repo({}))).rejects.toThrow(
+			/"9\.9\.x" is not a Git revision, branch, or version/,
+		);
 	});
 });

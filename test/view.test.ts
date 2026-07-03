@@ -62,10 +62,10 @@ describe("headerFields", () => {
 	const base = {
 		repository: sdc,
 		version: "0.1.0",
-		build: { sha: "abc1234" },
+		build: {},
 		range: {
-			from: { ref: "4.0.0", label: "4.0.0" },
-			to: { ref: "HEAD", label: "HEAD" },
+			from: { ref: "4.0.0", label: "4.0.0", kind: "tag" as RefKind },
+			to: { ref: "HEAD", label: "HEAD", kind: "head" as RefKind },
 		},
 		fromKind: "tag" as RefKind,
 		toKind: "head" as RefKind,
@@ -91,7 +91,7 @@ describe("headerFields", () => {
 				...base,
 				range: {
 					...base.range,
-					from: { ref, label: ref },
+					from: { ref, label: ref, kind },
 				},
 				fromKind: kind,
 				fromSha: sha,

@@ -221,8 +221,10 @@ The login is displayed with the spelling GitHub returns.
 == Selecting the Commit Range
 
 Changelog Tool scans the non-merge commits in a range.
-The range can be resolved from a single version or given explicitly.
+The range can be resolved from a single input — a version, a tag, or a maintenance branch — or given explicitly.
 In both forms the lower bound is excluded and the upper bound is included.
+Every input is interpreted in order: as a Git revision, as a branch name (local or on any remote), and finally as a version resolved through the tags.
+An interpretation that cannot complete a range falls through to the next, so a branch named like a version does not shadow the version.
 
 === Releasing a Version
 
@@ -234,6 +236,7 @@ changelog 4.0.4
 ----
 
 Supported forms: SemVer (`4.0.0`), shortened forms (`4`, `4.0`), a `v` prefix (`v4.0.0`), Spring-style GA qualifiers (`4.0.0.RELEASE`, `4.0.0.Final`), service releases (`4.0.0.SR1`), and pre-releases (`4.0.0-M1`, `4.0.0-RC1`, `4.0.0.SNAPSHOT`).
+A tag name releases the version its name spells, and a maintenance-branch name releases the branch's line (see <<maintenance-branch>>).
 
 * *Lower bound* (`from`): the previous release.
 A patch uses the previous patch (`4.0.4` against `4.0.3`).
@@ -309,6 +312,30 @@ Generation: 4.0
  Range:    3.5.0..HEAD
 ----
 
+[[maintenance-branch]]
+==== Maintenance Branch
+
+A maintenance-branch name (`4.0.x`) releases what accumulated on the line since its latest release: the lower bound is the line's latest release tag, the upper bound the branch tip:
+
+[source,shell]
+----
+changelog 4.0.x
+----
+
+[source]
+----
+Generation: 4.0
+
+ Branch:   4.0.x    <-- Branch tip 🚤
+  Tags:    4.0.3
+           4.0.4    <-- Latest release on the line 🔀
+
+ Range:    4.0.4..4.0.x
+----
+
+A line without a release tag fails as a first release; pass an explicit range.
+Other branches (`main`) and bare commits carry no version identity from which a lower bound could be inferred and require an explicit range as well.
+
 `changelog` stops rather than guessing when the history is incomplete: a missing predecessor between existing releases is reported as a gap, and a target with no earlier release as a first release.
 In both cases, pass an explicit range (see <<explicit-ranges>>).
 
@@ -326,7 +353,11 @@ changelog 4.0.0..4.0.4
 ----
 
 The two forms are equivalent.
-Each bound may be a tag, a branch, or a commit SHA.
+Each bound resolves independently, in order: a Git revision as spelled (a tag, branch, commit SHA, or revision expression such as `v4.0.0~2`), a branch name resolved against local branches and any remote, and finally a version.
+A version resolves through the tags across spellings, so `4.0.0..4.0.4` selects `v4.0.0.RELEASE..v4.0.4.RELEASE` in a repository that tags with a `v` prefix and a `.RELEASE` qualifier.
+As the upper bound, an untagged version resolves like auto mode: the maintenance-branch tip for a patch, or `HEAD` for a line opener.
+As the lower bound, a version must name an existing tag.
+The header shows the resolved form (`v4.0.0.RELEASE`, `origin/4.0.x`), not the input spelling.
 An empty upper bound (`4.0.0..`) means up to `HEAD`.
 Three-dot notation is not supported.
 
