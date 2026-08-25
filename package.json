@@ -37,7 +37,7 @@
 		"release": "release-it"
 	},
 	"dependencies": {
-		"@octokit/plugin-throttling": "11.0.3",
+		"@octokit/plugin-throttling": "11.0.5",
 		"chalk": "6.0.0",
 		"commander": "15.0.0",
 		"js-yaml": "5.4.0",
