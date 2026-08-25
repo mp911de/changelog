@@ -96,10 +96,10 @@ describe("runPipeline", () => {
 
 		expect(document).toBe(
 			"## :star: New Features\n" +
-				"- Add widgets. [#101](https://example.test/101)\n" +
+				"- Add widgets [#101](https://example.test/101)\n" +
 				"\n" +
 				"## :lady_beetle: Bug Fixes\n" +
-				"- Fix gadget. [#102](https://example.test/102)\n",
+				"- Fix gadget [#102](https://example.test/102)\n",
 		);
 	});
 
@@ -121,9 +121,9 @@ describe("runPipeline", () => {
 			}),
 		});
 
-		expect(document).toContain("Local change. [#1](https://example.test/1)");
+		expect(document).toContain("Local change [#1](https://example.test/1)");
 		expect(document).toContain(
-			"Cross-repository change. [acme/gizmos#1](https://example.test/1)",
+			"Cross-repository change [acme/gizmos#1](https://example.test/1)",
 		);
 	});
 
@@ -182,7 +182,8 @@ describe("runPipeline", () => {
 			"forbidden/repo#9",
 		]);
 		expect(resolved?.candidateNotFound).toEqual([]);
-		expect(document).toContain("Allowed cross repo. [octo/extras#5]");
+		expect(document).toContain("Allowed cross repo");
+		expect(document).toContain("[octo/extras#5]");
 		expect(document).not.toContain("Forbidden cross repo");
 	});
 
@@ -301,7 +302,8 @@ describe("runPipeline", () => {
 			}),
 		});
 
-		expect(document).toContain("- Backport fix. [#404]");
+		expect(document).toContain("- Backport fix");
+		expect(document).toContain("[#404]");
 		const lookedUp = progress.events.find(
 			(event) => event.type === "looking-up-complete",
 		);

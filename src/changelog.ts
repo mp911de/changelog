@@ -196,6 +196,5 @@ const MENTION = /(^|[^\w`])(@[\w-]+)/g;
 function formatTitle(title: string): string {
 	// Code formatting prevents issue titles from notifying mentioned users.
 	const quoted = title.replace(MENTION, "$1`$2`");
-	const trimmed = quoted.replace(/\s+$/, "");
-	return trimmed.endsWith(".") ? trimmed : `${trimmed}.`;
+	return quoted.replace(/\s+$/, "").replace(/[.!?]+$/, "");
 }

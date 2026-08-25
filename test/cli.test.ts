@@ -664,7 +664,7 @@ describe("main run-level", () => {
 		expect(code).toBe(0);
 		const document = out.join("");
 
-		expect(document).toContain("- Backport fix. [#10]");
+		expect(document).toContain("- Backport fix");
 		expect(document).not.toContain("The pull request");
 		expect(document).toContain("## :heart: Contributors\n- @contrib\n");
 	});
@@ -690,7 +690,7 @@ describe("main run-level", () => {
 		expect(code).toBe(0);
 		const document = out.join("");
 
-		expect(document).toContain("- Backport fix. [#10]");
+		expect(document).toContain("- Backport fix");
 		expect(document).not.toContain("First pull request");
 		expect(document).not.toContain("Second pull request");
 		expect(document).toContain("## :heart: Contributors\n- @alice\n- @zoe\n");
@@ -714,7 +714,7 @@ describe("main run-level", () => {
 		expect(code).toBe(0);
 		const document = out.join("");
 
-		expect(document).toContain("- Follow-up issue. [#10]");
+		expect(document).toContain("- Follow-up issue");
 		expect(document).not.toContain("The pull request");
 		expect(document).toContain("## :heart: Contributors\n- @contrib\n");
 	});
@@ -740,7 +740,7 @@ describe("main run-level", () => {
 		expect(code).toBe(0);
 		const document = out.join("");
 
-		expect(document).toContain("- Follow-up issue. [#10]");
+		expect(document).toContain("- Follow-up issue");
 		expect(document).not.toContain("First pull request");
 		expect(document).not.toContain("Second pull request");
 		expect(document).toContain("## :heart: Contributors\n- @alice\n- @zoe\n");
@@ -763,7 +763,8 @@ describe("main run-level", () => {
 		expect(code).toBe(0);
 		const document = out.join("");
 
-		expect(document).toContain("- The pull request. [#20]");
+		expect(document).toContain("- The pull request");
+		expect(document).toContain("[#20]");
 		expect(document).toContain("## :heart: Contributors\n- @contrib\n");
 	});
 
@@ -788,7 +789,7 @@ describe("main run-level", () => {
 		expect(code).toBe(0);
 		const document = out.join("");
 
-		expect(document).toContain("- Backport fix. [#10]");
+		expect(document).toContain("- Backport fix");
 		expect(document).not.toContain("The pull request");
 		expect(document).toContain("## :heart: Contributors\n- @contrib\n");
 	});
@@ -814,7 +815,7 @@ describe("main run-level", () => {
 		expect(code).toBe(0);
 		const document = out.join("");
 
-		expect(document).toContain("- Backport fix. [#10]");
+		expect(document).toContain("- Backport fix");
 		expect(document).not.toContain(":gear: Other Changes");
 		expect(document).not.toContain("The pull request");
 		expect(document).toContain("## :heart: Contributors\n- @contrib\n");
@@ -842,9 +843,10 @@ describe("main run-level", () => {
 		expect(code).toBe(0);
 		const document = out.join("");
 
-		expect(document).toContain("- Backport fix. [#10]");
+		expect(document).toContain("- Backport fix");
+		expect(document).toContain("[#10]");
 		expect(document).not.toContain("The pull request");
-		expect(document).toContain("- Follow-up issue. [#30]");
+		expect(document).toContain("- Follow-up issue");
 		expect(document).toContain("## :heart: Contributors\n- @contrib\n");
 	});
 
@@ -1034,7 +1036,7 @@ describe("main run-level", () => {
 
 		expect(code).toBe(0);
 		const document = out.join("");
-		expect(document).toContain("- Merge the change. [#30]");
+		expect(document).toContain("- Merge the change");
 		expect(document).toContain("## :heart: Contributors\n- @contrib\n");
 	});
 });

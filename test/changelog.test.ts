@@ -67,13 +67,13 @@ describe("generateChangelog entries", () => {
 
 		expect(markdown).toBe(
 			"## :star: New Features\n" +
-				"- Add widgets. [#1](https://example.test/1)\n" +
+				"- Add widgets [#1](https://example.test/1)\n" +
 				"\n" +
 				"## :lady_beetle: Bug Fixes\n" +
-				"- Fix gadget. [#2](https://example.test/2)\n" +
+				"- Fix gadget [#2](https://example.test/2)\n" +
 				"\n" +
 				"## :notebook_with_decorative_cover: Documentation\n" +
-				"- Document widgets. [#3](https://example.test/3)\n",
+				"- Document widgets [#3](https://example.test/3)\n",
 		);
 	});
 
@@ -86,7 +86,7 @@ describe("generateChangelog entries", () => {
 		);
 
 		expect(markdown).toBe(
-			"## :star: New Features\n- Both. [#1](https://example.test/1)\n",
+			"## :star: New Features\n- Both [#1](https://example.test/1)\n",
 		);
 		expect(markdown).not.toContain(":lady_beetle: Bug Fixes");
 	});
@@ -104,8 +104,8 @@ describe("generateChangelog entries", () => {
 
 		expect(markdown).toBe(
 			"## :lady_beetle: Bug Fixes\n" +
-				"- Lowercase qualified. [#1](https://example.test/1)\n" +
-				"- Title-cased qualified. [#2](https://example.test/2)\n",
+				"- Lowercase qualified [#1](https://example.test/1)\n" +
+				"- Title-cased qualified [#2](https://example.test/2)\n",
 		);
 	});
 
@@ -122,7 +122,7 @@ describe("generateChangelog entries", () => {
 		);
 
 		expect(markdown).toBe(
-			"## :lady_beetle: Bug Fixes\n" + "- Real fix. [#1](https://example.test/1)\n",
+			"## :lady_beetle: Bug Fixes\n" + "- Real fix [#1](https://example.test/1)\n",
 		);
 		expect(markdown).not.toContain("debugging");
 		expect(markdown).not.toContain("Not actually a bug");
@@ -140,7 +140,7 @@ describe("generateChangelog entries", () => {
 		);
 
 		expect(markdown).toBe(
-			"## :star: New Features\n- Real work. [#1](https://example.test/1)\n",
+			"## :star: New Features\n- Real work [#1](https://example.test/1)\n",
 		);
 		expect(markdown).not.toContain("Housekeeping");
 	});
@@ -157,7 +157,7 @@ describe("generateChangelog entries", () => {
 		);
 
 		expect(markdown).toBe(
-			"## :star: New Features\n- Add widgets. [#1](https://example.test/1)\n",
+			"## :star: New Features\n- Add widgets [#1](https://example.test/1)\n",
 		);
 		expect(markdown).not.toContain("Mystery");
 		expect(markdown).not.toContain("Other Changes");
@@ -176,10 +176,10 @@ describe("generateChangelog entries", () => {
 
 		expect(markdown).toBe(
 			"## :star: New Features\n" +
-				"- Add widgets. [#1](https://example.test/1)\n" +
+				"- Add widgets [#1](https://example.test/1)\n" +
 				"\n" +
 				"## :gear: Other Changes\n" +
-				"- Mystery. [#2](https://example.test/2)\n",
+				"- Mystery [#2](https://example.test/2)\n",
 		);
 	});
 
@@ -194,11 +194,13 @@ describe("generateChangelog entries", () => {
 		expect(markdown).toBe("");
 	});
 
-	it("ends each entry with a single period, adding one only when the title lacks it", () => {
+	it("omits terminal punctuation while preserving punctuation within the title", () => {
 		const { markdown } = generateChangelog(
 			[
 				entry("#1", "Add support for foo", ["enhancement"]),
 				entry("#2", "Already a sentence.", ["enhancement"]),
+				entry("#3", "Is this supported?", ["enhancement"]),
+				entry("#4", "Lorem ipsum! foo", ["enhancement"]),
 			],
 			[],
 			defaultConfig,
@@ -206,11 +208,11 @@ describe("generateChangelog entries", () => {
 		);
 
 		expect(markdown).toContain(
-			"- Add support for foo. [#1](https://example.test/1)\n",
+			"- Add support for foo [#1](https://example.test/1)\n",
 		);
-		expect(markdown).toContain(
-			"- Already a sentence. [#2](https://example.test/2)\n",
-		);
+		expect(markdown).toContain("- Already a sentence [#2](https://example.test/2)\n");
+		expect(markdown).toContain("- Is this supported [#3](https://example.test/3)\n");
+		expect(markdown).toContain("- Lorem ipsum! foo [#4](https://example.test/4)\n");
 	});
 
 	it("wraps @mentions in backticks so contributors are not notified", () => {
@@ -233,7 +235,7 @@ describe("generateChangelog entries", () => {
 		);
 
 		expect(markdown).toContain(
-			"- Fix <script> and [link]. [#1](https://example.test/1)\n",
+			"- Fix <script> and [link] [#1](https://example.test/1)\n",
 		);
 	});
 
@@ -403,7 +405,7 @@ describe("generateChangelog contributor credit", () => {
 
 		expect(markdown).toBe(
 			"## :star: New Features\n" +
-				"- Add widgets. [#1](https://example.test/1)\n" +
+				"- Add widgets [#1](https://example.test/1)\n" +
 				"\n" +
 				"## :heart: Contributors\n" +
 				"- @contrib\n",
