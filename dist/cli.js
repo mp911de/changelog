@@ -300,7 +300,7 @@ function hasStringProp(error, key) {
 //#region src/git.ts
 const execFileAsync$1 = promisify(execFile);
 const GIT_NOT_FOUND = "Git was not found. Install it from https://git-scm.com/ and try again.";
-const LOG_MAX_BUFFER = 256 * 1024 * 1024;
+const LOG_MAX_BUFFER = 268435456;
 const NUL = "\0";
 const NUL_FORMAT = "%x00";
 async function scanCommits(from, to, cwd, trace) {
@@ -529,7 +529,8 @@ function hostUser(value) {
 	return typeof user === "string" ? user : void 0;
 }
 function ghHostsPath(env) {
-	return join(env.GH_CONFIG_DIR ?? (env.XDG_CONFIG_HOME ? join(env.XDG_CONFIG_HOME, "gh") : join(homedir(), ".config", "gh")), "hosts.yml");
+	const configDir = env.GH_CONFIG_DIR ?? (env.XDG_CONFIG_HOME ? join(env.XDG_CONFIG_HOME, "gh") : join(homedir(), ".config", "gh"));
+	return join(configDir, "hosts.yml");
 }
 /**
 * Detect the repository without `gh repo view`: parse the git remote URL and, when its host is
@@ -589,7 +590,7 @@ async function gitRemoteUrl(cwd, trace) {
 * step substitutes the value) and {@code "unknown"} when the build ran without git access (a
 * tarball checkout, or git missing from PATH).
 */
-const commitSha = "b3eb5f1";
+const commitSha = "5de7d0b";
 /**
 * Resolve the best GitHub link for the running build within the changelog tool's own repository,
 * parsed from the {@code repository.url} field of package.json (e.g.
@@ -947,7 +948,8 @@ function collectContributors(authors, team) {
 	return [...seen.values()].sort((a, b) => a.toLowerCase().localeCompare(b.toLowerCase()));
 }
 function renderContributors(contributors) {
-	return `## ${CONTRIBUTORS_TITLE}\n${contributors.map((author) => `- @${author}\n`).join("")}`;
+	const lines = contributors.map((author) => `- @${author}\n`).join("");
+	return `## ${CONTRIBUTORS_TITLE}\n${lines}`;
 }
 /**
 * Precompile every section and exclude token into its word-boundary matcher once per run, keyed by
@@ -979,8 +981,7 @@ function renderEntry(entry) {
 }
 const MENTION = /(^|[^\w`])(@[\w-]+)/g;
 function formatTitle(title) {
-	const trimmed = title.replace(MENTION, "$1`$2`").replace(/\s+$/, "");
-	return trimmed.endsWith(".") ? trimmed : `${trimmed}.`;
+	return title.replace(MENTION, "$1`$2`").replace(/\s+$/, "").replace(/[.!?]+$/, "");
 }
 //#endregion
 //#region src/json-file.ts
@@ -1363,7 +1364,8 @@ async function runPipeline(options) {
 	})).then((result) => result.aggregate);
 	const resolved = await runStage(progress, "Looking up", async (debug) => {
 		const { followed, excluded } = partitionByFollow(aggregate.targets, options.config.followReferences);
-		return resolveTicketReferences(aggregate, await options.lookup(followed, debug), excluded);
+		const facts = await options.lookup(followed, debug);
+		return resolveTicketReferences(aggregate, facts, excluded);
 	}, (result) => ({
 		type: "looking-up-complete",
 		stage: "Looking up",
