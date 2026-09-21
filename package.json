@@ -51,7 +51,7 @@
 		"prettier": "3.9.8",
 		"release-it": "^21.1.0",
 		"tsdown": "0.23.0",
-		"typescript": "5.6.3",
+		"typescript": "7.0.2",
 		"vite-node": "6.0.0",
 		"vitest": "4.1.11"
 	},
