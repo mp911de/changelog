@@ -149,8 +149,8 @@ const SERVICE_BRANCH_NAME = /^\d+(?:\.\d+)*\.x$/;
  * Resolve the commit range for releasing {@code input}, interpreting it in order: a Service
  * Branch name releases what accumulated on that line since its latest release, and anything else
  * is read as a version — a tag spelling its own version, or a version resolved against the tags.
- * The upper bound is the matching tag, the Service Branch tip for a patch, or HEAD for a
- * line-opener; the lower bound is the Predecessor, which must exist. A revision that matches but
+ * The upper bound is the matching tag, then the Service Branch tip for a patch if present,
+ * then HEAD. The lower bound is the Predecessor, which must exist. A revision that matches but
  * cannot infer a lower bound (a plain branch, a commit, a tag that spells no version) falls
  * through to the next interpretation and only fails when none completes.
  */
@@ -246,7 +246,7 @@ async function describeAutoFailure(input: string, repo: RepoRefs): Promise<strin
  * branch, HEAD, or a revision expression like {@code v1.0.0~2}), a bare branch name resolved
  * against local and remote-tracking refs, and finally a version resolved through the tags. As a
  * version, the {@code to} side reuses the full auto-mode upper-bound chain (matching tag, Service
- * Branch tip, HEAD for a line-opener) while the {@code from} side must name an existing tag,
+ * Branch tip for a patch if present, then HEAD) while the {@code from} side must name an existing tag,
  * because an untagged version denotes no commit to scan from.
  */
 export async function resolveExplicitBound(
@@ -307,18 +307,13 @@ async function resolveUpperBound(
 	if (tagged !== undefined) {
 		return tagBound(tagged.raw);
 	}
-	// A line-opener is developed on the current checkout; a patch comes off its Service Branch.
-	if (isLineOpener(target)) {
-		return { ref: "HEAD", label: "HEAD", kind: "head" };
+	if (!isLineOpener(target)) {
+		const branch = await repo.resolveBranch(serviceBranch(target));
+		if (branch !== undefined) {
+			return branchBound(branch);
+		}
 	}
-	const branch = serviceBranch(target);
-	const resolved = await repo.resolveBranch(branch);
-	if (resolved === undefined) {
-		throw new Error(
-			`no ${branch} service branch found for ${target.raw}; check out the service branch or pass <from> <to>`,
-		);
-	}
-	return branchBound(resolved);
+	return { ref: "HEAD", label: "HEAD", kind: "head" };
 }
 
 interface LowerBound {

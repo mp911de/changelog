@@ -346,8 +346,7 @@ export function samePreReleaseFamily(
 
 /**
  * Whether {@code version} opens a Release Line rather than advancing one: a trailing-zero last
- * component (`4.1.0`, `4.0`) or a single component (`4`). Line-openers take HEAD as their upper
- * bound; everything else is a patch resolved against a Service Branch.
+ * component (`4.1.0`, `4.0`) or a single component (`4`).
  */
 export function isLineOpener(version: ArtifactVersion): boolean {
 	if (version.qualifier.kind === "service-release") {

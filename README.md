@@ -46,6 +46,7 @@ Supported versions include SemVer and common Spring-style forms such as `4.0`, `
 | `changelog 4.0.x`        | the latest release on the line up to the branch tip                                        |
 | `changelog 4.0.0..4.0.4` | exactly the given bounds; same as `changelog 4.0.0 4.0.4`                                  |
 
+Before tagging, a patch release uses `HEAD` when its service branch is absent.
 In an explicit range, each bound may be a tag, a branch, a commit, or a version; the `from` revision is excluded and the `to` revision is included.
 Release notes are written to `release-notes.md` by default.
 How ranges are resolved in detail is described in the [Reference Documentation](REFERENCE.adoc).

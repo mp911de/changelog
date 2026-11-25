@@ -246,7 +246,8 @@ In the diagrams below, `<--` marks a resolved bound and `Range` is the result; <
 
 ==== Patch
 
-Before `4.0.4` is tagged, the upper bound is the tip of the `4.0.x` branch:
+Before `4.0.4` is tagged, the upper bound is `HEAD` if the repository has no `4.0.x` branch.
+When the branch exists, its tip is the upper bound:
 
 [source]
 ----
@@ -344,7 +345,7 @@ The diagrams follow from two rules:
 A patch uses the previous patch (`4.0.4` against `4.0.3`).
 A line opener (a version with a trailing zero, such as `4.1.0`) uses the opener of the preceding line: a minor against the previous minor (`4.1.0` against `4.0.0`), a major against the opener of the previous major's most recent line (`4.0.0` against `3.5.0`).
 A maintenance branch uses the latest release on its line.
-* *Upper bound* (`to`): an existing tag for the version (which regenerates released notes), otherwise the maintenance-branch tip (`4.0.x`, preferring a local branch, then `origin`, then any other remote) for a patch, otherwise `HEAD` for a line opener.
+* *Upper bound* (`to`): an existing tag for the version, then the maintenance-branch tip for a patch if present (preferring a local branch, then `origin`, then any other remote), then `HEAD`.
 
 `changelog` stops rather than guessing when the history is incomplete: a missing predecessor between existing releases is a gap, a target with no earlier release a first release, and both require an explicit range (see <<explicit-ranges>>).
 
@@ -383,7 +384,7 @@ An interpretation that cannot complete the range falls through to the next, so a
 An untagged version is an error, because it denotes no commit.
 
 | A version as upper bound (`4.0.4`)
-| the tag when present, otherwise the maintenance-branch tip for a patch or `HEAD` for a line opener, as in <<releasing-a-version>>.
+| the matching tag, then the maintenance-branch tip for a patch if present, then `HEAD`, as in <<releasing-a-version>>.
 |===
 
 The header shows the resolved form (`v4.0.0.RELEASE`, `origin/4.0.x`), not the input spelling.

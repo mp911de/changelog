@@ -261,15 +261,13 @@ describe("resolveAutoRange", () => {
 		);
 	});
 
-	it("fails when a patch has no resolvable service branch", async () => {
-		const refs = repo({
-			tags: async () => ["4.0.6"],
-			resolveBranch: async () => undefined,
-		});
+	it("resolves a patch to its predecessor and HEAD without a service branch", async () => {
+		const refs = repo({ tags: async () => ["1.0.0"] });
 
-		await expect(resolveAutoRange("4.0.7", refs)).rejects.toThrow(
-			/no 4\.0\.x service branch found/,
-		);
+		expect(range(await resolveAutoRange("1.0.1", refs))).toEqual({
+			from: "1.0.0",
+			to: "HEAD",
+		});
 	});
 
 	it("matches a bare version against v-prefixed tags and returns the tag spelling", async () => {
@@ -531,12 +529,14 @@ describe("resolveExplicitBound", () => {
 		});
 	});
 
-	it("fails an untagged patch to-bound without its service branch", async () => {
+	it("resolves an untagged patch to-bound to HEAD without its service branch", async () => {
 		const refs = repo({ tags: async () => TAGS });
 
-		await expect(resolveExplicitBound("4.0.6", "to", refs)).rejects.toThrow(
-			/no 4\.0\.x service branch found for 4\.0\.6/,
-		);
+		expect(await resolveExplicitBound("4.0.6", "to", refs)).toEqual({
+			ref: "HEAD",
+			label: "HEAD",
+			kind: "head",
+		});
 	});
 
 	it("fails an untagged from-bound version", async () => {
