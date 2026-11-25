@@ -584,7 +584,7 @@ async function gitRemoteUrl(cwd, trace) {
 * step substitutes the value) and {@code "unknown"} when the build ran without git access (a
 * tarball checkout, or git missing from PATH).
 */
-const commitSha = "7115ce3";
+const commitSha = "abb6aff";
 /**
 * Resolve the best GitHub link for the running build within the changelog tool's own repository,
 * parsed from the {@code repository.url} field of package.json (e.g.
