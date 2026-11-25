@@ -1,6 +1,6 @@
 #!/usr/bin/env node
-import { createRequire } from "node:module";
 import { realpathSync, statSync } from "node:fs";
+import { createRequire } from "node:module";
 import { basename, dirname, isAbsolute, join, resolve } from "node:path";
 import { argv, stderr, stdout } from "node:process";
 import { fileURLToPath, pathToFileURL } from "node:url";
@@ -15,7 +15,7 @@ import { Octokit } from "octokit";
 import pLimit from "p-limit";
 import { Chalk, supportsColor, supportsColorStderr } from "chalk";
 import stringWidth from "string-width";
-//#region src/atomic-file.ts
+// src/atomic-file.ts
 /**
 * Replace a file atomically without following an existing destination symlink. The temporary file
 * is created exclusively in the destination directory so another process cannot substitute it.
@@ -35,8 +35,7 @@ async function writeFileAtomically(path, content) {
 		throw error;
 	}
 }
-//#endregion
-//#region src/ticket-references.ts
+// src/ticket-references.ts
 function normalizeOccurrenceId(id) {
 	if (id.toLowerCase().startsWith("gh-")) return `#${id.substring(3)}`;
 	return id;
@@ -213,8 +212,7 @@ function toTarget(occurrence, currentRepository) {
 function sameRepository(left, right) {
 	return right !== void 0 && left.owner.toLowerCase() === right.owner.toLowerCase() && left.repo.toLowerCase() === right.repo.toLowerCase();
 }
-//#endregion
-//#region src/links.ts
+// src/links.ts
 const GITHUB = "https://github.com";
 function repoUrl(repo, path = "") {
 	return `${GITHUB}/${repo.owner}/${repo.repo}${path}`;
@@ -282,8 +280,7 @@ function headerFields(params) {
 		}]
 	};
 }
-//#endregion
-//#region src/errors.ts
+// src/errors.ts
 function prop(error, key) {
 	return typeof error === "object" && error !== null ? error[key] : void 0;
 }
@@ -296,8 +293,7 @@ function hasStatus(error, status) {
 function hasStringProp(error, key) {
 	return typeof prop(error, key) === "string";
 }
-//#endregion
-//#region src/git.ts
+// src/git.ts
 const execFileAsync$1 = promisify(execFile);
 const GIT_NOT_FOUND = "Git was not found. Install it from https://git-scm.com/ and try again.";
 const LOG_MAX_BUFFER = 268435456;
@@ -459,8 +455,7 @@ function gitStderr(error) {
 function isNotARepository(error) {
 	return gitStderr(error).includes("not a git repository");
 }
-//#endregion
-//#region src/repo-detect.ts
+// src/repo-detect.ts
 const REPOSITORY_NAME = /^[A-Za-z0-9._-]+$/;
 /**
 * Whether {@code name} is a usable GitHub owner or repository path segment: the GitHub character
@@ -582,15 +577,14 @@ async function gitRemoteUrl(cwd, trace) {
 		first
 	]) : void 0;
 }
-//#endregion
-//#region src/build-info.ts
+// src/build-info.ts
 /**
 * Abbreviated commit SHA this build was produced from, captured at build time. Reports
 * {@code "dev"} when running from source (tests, {@code npm run run} via vite-node, where no build
 * step substitutes the value) and {@code "unknown"} when the build ran without git access (a
 * tarball checkout, or git missing from PATH).
 */
-const commitSha = "5de7d0b";
+const commitSha = "7115ce3";
 /**
 * Resolve the best GitHub link for the running build within the changelog tool's own repository,
 * parsed from the {@code repository.url} field of package.json (e.g.
@@ -606,8 +600,7 @@ function buildVersionUrl(repositoryUrl, sha, version) {
 	if (/^[0-9a-f]+$/i.test(sha)) return commitUrl(remote, sha);
 	return repoUrl(remote, `/releases/tag/${version}`);
 }
-//#endregion
-//#region src/github-context.ts
+// src/github-context.ts
 const execFileAsync = promisify(execFile);
 const GH_NOT_FOUND = "GitHub CLI (gh) was not found. Install it from https://cli.github.com/ and try again.";
 /**
@@ -738,8 +731,7 @@ function parseRepository(nameWithOwner) {
 		repo
 	};
 }
-//#endregion
-//#region src/lookup.ts
+// src/lookup.ts
 const CONCURRENCY = 10;
 function createTargetLookup(options) {
 	const { octokit, repo, cache, refresh } = options;
@@ -823,8 +815,7 @@ function toResolvedTicket(data) {
 		author: data.user?.login
 	};
 }
-//#endregion
-//#region src/github-adapter.ts
+// src/github-adapter.ts
 function createTraceRouter(initial) {
 	let active = initial;
 	return {
@@ -866,8 +857,7 @@ const defaultGitHubAdapter = async ({ cwd, repoOverride, trace }) => {
 		}
 	};
 };
-//#endregion
-//#region src/text.ts
+// src/text.ts
 /**
 * Escape the regular-expression metacharacters in {@code text} so it can be embedded as a literal
 * inside a larger pattern.
@@ -875,8 +865,7 @@ const defaultGitHubAdapter = async ({ cwd, repoOverride, trace }) => {
 function escapeRegExp(text) {
 	return text.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 }
-//#endregion
-//#region src/changelog.ts
+// src/changelog.ts
 const OTHER_CHANGES_TITLE = ":gear: Other Changes";
 /**
 * Generate the Changelog Document from separate document-generation inputs: resolved Changelog
@@ -983,8 +972,7 @@ const MENTION = /(^|[^\w`])(@[\w-]+)/g;
 function formatTitle(title) {
 	return title.replace(MENTION, "$1`$2`").replace(/\s+$/, "").replace(/[.!?]+$/, "");
 }
-//#endregion
-//#region src/json-file.ts
+// src/json-file.ts
 /**
 * A missing file is always optional. By default a present-but-invalid file still throws so
 * invalid configuration is not silently replaced; pass {@code onInvalid: "ignore"} to recover
@@ -1016,8 +1004,7 @@ async function writeJsonFile(path, value) {
 	await mkdir(dirname(path), { recursive: true });
 	await writeFileAtomically(path, `${JSON.stringify(value, null, 2)}\n`);
 }
-//#endregion
-//#region src/config.ts
+// src/config.ts
 function defaultConfig(login, owner) {
 	const base = {
 		sections: [
@@ -1129,8 +1116,7 @@ function stringArray(value, path, description) {
 function invalidConfig(path, detail) {
 	return /* @__PURE__ */ new Error(`Invalid changelog configuration at "${path}": ${detail}.`);
 }
-//#endregion
-//#region src/commit-parser.ts
+// src/commit-parser.ts
 const GITHUB_QUALIFIED_TICKET = "([\\w-]{1,100})/([\\w-]{1,100})((#|gh-)\\d+)";
 const GITHUB_URL_QUALIFIED_TICKET = "http[s:/]+[\\w.]{1,253}/([\\w-]{1,100})/([\\w-]{1,100})/issues/(\\d+)";
 const GITHUB_TICKET = "((?:#|gh-)\\d+)";
@@ -1231,8 +1217,7 @@ function extractOccurrence(token, qualifier) {
 	});
 	if (TICKET_MATCH.test(trimmed)) return referenceOccurrence(trimmed, qualifier);
 }
-//#endregion
-//#region src/progress.ts
+// src/progress.ts
 const noRunProgress = { emit: () => {} };
 /**
 * Run one stage with enforced event ordering and stage-bound debug. Emits a start event, runs the
@@ -1262,8 +1247,7 @@ async function runStage(progress, stage, action, complete) {
 		throw error;
 	}
 }
-//#endregion
-//#region src/resolved-references.ts
+// src/resolved-references.ts
 /**
 * Join {@link aggregate} with {@link lookup} facts. Each unsuppressed candidate target with facts
 * becomes a Changelog Entry. Author facts follow the credit rule: a credit-purpose target is always
@@ -1337,8 +1321,7 @@ function toNotFound(aggregate, target) {
 		commit
 	};
 }
-//#endregion
-//#region src/pipeline.ts
+// src/pipeline.ts
 async function runPipeline(options) {
 	const progress = options.progress ?? noRunProgress;
 	const scan = options.scan ?? scanCommits;
@@ -1397,8 +1380,7 @@ function partitionByFollow(targets, patterns) {
 		excluded
 	};
 }
-//#endregion
-//#region src/cache.ts
+// src/cache.ts
 async function loadCache(options) {
 	const path = join(options.baseDir, ".changelog", `${options.slug}.cache.json`);
 	const entries = compatibleEntries(await readOptionalJson(path, {
@@ -1431,8 +1413,7 @@ function isResolvedTicket(value) {
 	const ticket = value;
 	return typeof ticket.title === "string" && typeof ticket.htmlUrl === "string" && Array.isArray(ticket.labels) && ticket.labels.every((label) => typeof label === "string") && typeof ticket.pullRequest === "boolean" && (ticket.author === void 0 || typeof ticket.author === "string");
 }
-//#endregion
-//#region src/artifact-version.ts
+// src/artifact-version.ts
 const SHAPE = /^(\d+(?:\.\d+)*)(?:([.-])(.+))?$/;
 const NUMERIC_QUALIFIER = /^\d+(?:\.\d+)*$/;
 const SINGLE_SEGMENT_QUALIFIER = /^([a-zA-Z]+)([.-])?(\d*)$/;
@@ -1649,8 +1630,7 @@ function samePreReleaseFamily(left, right) {
 }
 /**
 * Whether {@code version} opens a Release Line rather than advancing one: a trailing-zero last
-* component (`4.1.0`, `4.0`) or a single component (`4`). Line-openers take HEAD as their upper
-* bound; everything else is a patch resolved against a Service Branch.
+* component (`4.1.0`, `4.0`) or a single component (`4`).
 */
 function isLineOpener(version) {
 	if (version.qualifier.kind === "service-release") return false;
@@ -1755,8 +1735,7 @@ function compare(left, right) {
 	if (left === right) return 0;
 	return left < right ? -1 : 1;
 }
-//#endregion
-//#region src/version.ts
+// src/version.ts
 /**
 * Interpret the positional arguments. A lone argument is the release target (auto mode); two
 * arguments or a `<from>..<to>` range supply explicit bounds. Git refnames cannot contain "..", so
@@ -1807,8 +1786,8 @@ const SERVICE_BRANCH_NAME = /^\d+(?:\.\d+)*\.x$/;
 * Resolve the commit range for releasing {@code input}, interpreting it in order: a Service
 * Branch name releases what accumulated on that line since its latest release, and anything else
 * is read as a version — a tag spelling its own version, or a version resolved against the tags.
-* The upper bound is the matching tag, the Service Branch tip for a patch, or HEAD for a
-* line-opener; the lower bound is the Predecessor, which must exist. A revision that matches but
+* The upper bound is the matching tag, then the Service Branch tip for a patch if present,
+* then HEAD. The lower bound is the Predecessor, which must exist. A revision that matches but
 * cannot infer a lower bound (a plain branch, a commit, a tag that spells no version) falls
 * through to the next interpretation and only fails when none completes.
 */
@@ -1870,7 +1849,7 @@ async function describeAutoFailure(input, repo) {
 * branch, HEAD, or a revision expression like {@code v1.0.0~2}), a bare branch name resolved
 * against local and remote-tracking refs, and finally a version resolved through the tags. As a
 * version, the {@code to} side reuses the full auto-mode upper-bound chain (matching tag, Service
-* Branch tip, HEAD for a line-opener) while the {@code from} side must name an existing tag,
+* Branch tip for a patch if present, then HEAD) while the {@code from} side must name an existing tag,
 * because an untagged version denotes no commit to scan from.
 */
 async function resolveExplicitBound(input, side, repo) {
@@ -1903,15 +1882,15 @@ function taggedVersion(target, tags) {
 async function resolveUpperBound(target, tags, repo) {
 	const tagged = taggedVersion(target, tags);
 	if (tagged !== void 0) return tagBound(tagged.raw);
-	if (isLineOpener(target)) return {
+	if (!isLineOpener(target)) {
+		const branch = await repo.resolveBranch(serviceBranch(target));
+		if (branch !== void 0) return branchBound(branch);
+	}
+	return {
 		ref: "HEAD",
 		label: "HEAD",
 		kind: "head"
 	};
-	const branch = serviceBranch(target);
-	const resolved = await repo.resolveBranch(branch);
-	if (resolved === void 0) throw new Error(`no ${branch} service branch found for ${target.raw}; check out the service branch or pass <from> <to>`);
-	return branchBound(resolved);
 }
 function resolveLowerBound(target, tags) {
 	const releases = tags.filter((version) => version.isRelease);
@@ -1980,8 +1959,7 @@ function previousLineOpener(target, releases) {
 		expected: opener.raw
 	};
 }
-//#endregion
-//#region src/prepare.ts
+// src/prepare.ts
 /**
 * Resolve everything a run needs before scanning: the commit range (each input interpreted in
 * order as a Git revision, a bare branch name, or a version resolved through the tags), the
@@ -2150,8 +2128,7 @@ function pad(text, width, textWidth, align, last) {
 	if (align === "right") return fill + text;
 	return last ? text : text + fill;
 }
-//#endregion
-//#region src/reference-flow.ts
+// src/reference-flow.ts
 const SUMMARY_MIN = 10;
 const FLOW_SEP = " ";
 const CORE_GAP = "  ";
@@ -2286,8 +2263,7 @@ function layoutFlow(palette, items, budget) {
 	if (current.length > 0) lines.push(current);
 	return lines;
 }
-//#endregion
-//#region src/block.ts
+// src/block.ts
 function layoutRows(palette, rows, budget) {
 	if (rows.length === 0) return [];
 	const columns = Math.max(...rows.map((row) => row.cells.length));
@@ -2298,7 +2274,7 @@ function layoutRows(palette, rows, budget) {
 		const before = row.cells.slice(0, -1).reduce((sum, _, column) => sum + widths[column] + gap, 0);
 		return row.cells.map((cell, column) => {
 			const last = column === row.cells.length - 1;
-			const text = last && budget !== Infinity ? truncateText(palette, cell.text, Math.max(0, budget - before)) : cell.text;
+			const text = last && budget !== 1e400 ? truncateText(palette, cell.text, Math.max(0, budget - before)) : cell.text;
 			return realize(palette, pad(text, widths[column], palette.width(text), cell.align ?? "left", last), cell);
 		}).join(" ".repeat(gap));
 	});
@@ -2317,7 +2293,7 @@ function blockLines(palette, glyph, content) {
 	const children = [];
 	for (const entry of content.debugLines ?? []) children.push(palette.style(entry, "faint"));
 	for (const note of content.notes ?? []) children.push(renderInline(palette, note));
-	const budget = content.budget ?? Infinity;
+	const budget = content.budget ?? 1e400;
 	children.push(...layoutRows(palette, content.rows ?? [], budget));
 	const commitLineFrom = lines.length + children.length;
 	children.push(...layoutCommitRows(palette, content.commitRows ?? [], budget));
@@ -2403,8 +2379,7 @@ function headerBoxLines(palette, fields, color) {
 		palette.style(`╰${bar}╯`, "faint")
 	];
 }
-//#endregion
-//#region src/live-reporter.ts
+// src/live-reporter.ts
 const FRAMES = [
 	"⠋",
 	"⠙",
@@ -2558,8 +2533,7 @@ function consumeEscape(line, start) {
 	while (index < line.length && line[index] !== "m") index += 1;
 	return index + 1;
 }
-//#endregion
-//#region src/render.ts
+// src/render.ts
 function createRenderer(stream, options = {}) {
 	const caps = options.capabilities ?? detectCapabilities(stream);
 	const palette = createPalette(caps.level, caps.hyperlinks);
@@ -2629,8 +2603,7 @@ function staticReporter(stream, palette) {
 		dispose() {}
 	};
 }
-//#endregion
-//#region src/view.ts
+// src/view.ts
 function plural(count, singular, plural = `${singular}s`) {
 	return count === 1 ? singular : plural;
 }
@@ -2976,8 +2949,7 @@ function generatedView(summary, scanned, resolved) {
 		rows: ledgerRows(facts)
 	};
 }
-//#endregion
-//#region src/cli.ts
+// src/cli.ts
 const pkg = createRequire(import.meta.url)("../package.json");
 function toInvocation(target, to, opts, invocationDirectory) {
 	const { C: directory, ...invocation } = opts;
@@ -3189,5 +3161,4 @@ if (isMainModule(import.meta.url, argv[1])) main().then((code) => {
 	console.error(error instanceof Error ? error.message : error);
 	process.exitCode = 1;
 });
-//#endregion
 export { isMainModule, main };
